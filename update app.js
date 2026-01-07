@@ -44,7 +44,7 @@ const STATE = {
         tokenTimer: null
     },
     realtime: {
-        presenceChannel: null // Tempat menyimpan channel agar bisa di-reset
+        presenceChannel: null 
     }
 };
 
@@ -87,22 +87,18 @@ const Utils = {
 // ============================================================================
 const DB = {
    async getStudents() {
-        // [PERBAIKAN] Gunakan select('*') agar tidak error jika salah nama kolom
         const { data, error } = await db
             .from('students')
             .select('*') 
-            .order('created_at', { ascending: false }); // Urutkan dari yang terbaru
+            .order('created_at', { ascending: false }); 
         
         if (error) { 
             console.error("DB Error:", error); 
             return []; 
         }
         
-        // [PERBAIKAN] Mapping yang lebih fleksibel
-        // Kita cek: pakai 'nama_lengkap' ATAU 'nama' (tergantung yang ada di DB)
         return data.map(s => ({
             username: s.username || '-',
-            // Cek dua kemungkinan nama kolom
             nama: s.nama_lengkap || s.nama || '(Tanpa Nama)', 
             id_peserta: s.id_peserta || '-',
             pass: s.password || s.pass || '123456', 
@@ -165,21 +161,19 @@ const DB = {
     async updateExam(id, data) { return await db.from('exams').update(data).eq('id', id); },
     async deleteExam(id) { return await db.from('exams').delete().eq('id', id); },
     async addQuestion(data) { return await db.from('questions').insert([data]); },
+    
     // --- TRACKING & LOGS ---
     async incrementHit() {
-        // Panggil fungsi RPC yang sudah kita buat di SQL
         await db.rpc('increment_hit');
     },
 
     async logDevice() {
-        // 1. Generate/Ambil Device ID dari LocalStorage (Agar persisten)
         let deviceId = localStorage.getItem('cbt_device_id');
         if (!deviceId) {
             deviceId = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
             localStorage.setItem('cbt_device_id', deviceId);
         }
 
-        // 2. Deteksi Info Browser Sederhana
         const ua = navigator.userAgent;
         let deviceName = "Unknown Device";
         if (ua.includes("Win")) deviceName = "Windows PC";
@@ -188,28 +182,37 @@ const DB = {
         else if (ua.includes("Android")) deviceName = "Android";
         else if (ua.includes("iPhone")) deviceName = "iPhone";
         
-        // Tambahkan browser info
         if (ua.includes("Chrome")) deviceName += " (Chrome)";
         else if (ua.includes("Firefox")) deviceName += " (Firefox)";
         else if (ua.includes("Safari")) deviceName += " (Safari)";
 
-        // 3. Coba ambil IP (Optional - pakai service gratisan)
-        let ip = '-';
-        try {
-            const res = await fetch('https://api.ipify.org?format=json');
-            const json = await res.json();
-            ip = json.ip;
-        } catch (e) { console.log("IP fetch failed"); }
-
-        // 4. UPSERT ke Database (Update jika ada, Insert jika baru)
-        const { error } = await db.from('device_logs').upsert({
+        // OPTIMASI: Kirim Data Dulu (Tanpa await fetch IP) agar cepat
+        const baseData = {
             device_id: deviceId,
             device_name: deviceName,
-            ip_address: ip,
             last_seen: new Date(),
-            // Logika increment visit_count agak tricky di upsert client-side standar,
-            // untuk simpelnya kita update waktu saja dulu.
-        }, { onConflict: 'device_id' });
+            ip_address: localStorage.getItem('last_known_ip') || '-' // Pakai IP lama dulu
+        };
+
+        // Simpan ke DB (Fire and Forget)
+        db.from('device_logs').upsert(baseData, { onConflict: 'device_id' }).then();
+
+        // Cari IP di background (Non-Blocking)
+        setTimeout(async () => {
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 1500);
+                const res = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
+                clearTimeout(timeoutId);
+                
+                if (res.ok) {
+                    const json = await res.json();
+                    localStorage.setItem('last_known_ip', json.ip);
+                    // Update IP belakangan
+                    await db.from('device_logs').update({ ip_address: json.ip }).eq('device_id', deviceId);
+                }
+            } catch (e) {}
+        }, 100);
     },
 
     async getDeviceLogs() {
@@ -217,16 +220,17 @@ const DB = {
             .from('device_logs')
             .select('*')
             .order('last_seen', { ascending: false })
-            .limit(50); // Ambil 50 terakhir
+            .limit(50);
         return data || [];
     },
     
-    // Ambil Total Hits Real
     async getSiteStats() {
+        // [PERBAIKAN] Gunakan maybeSingle agar tidak error jika tabel kosong
         const { data } = await db.from('site_stats').select('total_hits').limit(1).maybeSingle();
         return data ? data.total_hits : 0;
     }
 };
+
 // ============================================================================
 // 4. AUTHENTICATION (LOGIN/LOGOUT)
 // ============================================================================
@@ -240,14 +244,11 @@ const Auth = {
         }
     },
 
-    // Di dalam object Auth:
-
     async login(userIdID, passID, btnID) {
         const userInput = Utils.getEl(userIdID);
         const passInput = Utils.getEl(passID);
         const btn = Utils.getEl(btnID);
 
-        // 1. Sanitasi & Validasi Cepat
         const userVal = userInput ? userInput.value.trim() : '';
         const passVal = passInput ? passInput.value.trim() : '';
 
@@ -256,52 +257,40 @@ const Auth = {
             return;
         }
 
-        Utils.setLoading(btn, true, "Checking..."); // Feedback instan ke user
+        Utils.setLoading(btn, true, "Checking...");
 
         try {
-            // 2. Request ke Database (Optimasi: Gunakan .maybeSingle() jika versi supabase baru, atau tetap .single())
             const { data, error } = await db
-                .from('users').select('id, username, role') // Optimasi: Hanya ambil kolom yg butuh
+                .from('users').select('id, username, role')
                 .eq('username', userVal).eq('password', passVal)
                 .single();
 
             if (error || !data) throw new Error("Username/Password Salah");
 
-            // 3. Simpan Sesi (Sinkronus - Cepat)
             const session = { id: data.id, username: data.username, role: data.role };
             localStorage.setItem('cbt_user_session', JSON.stringify(session));
             
-            // Update status login di background (tidak perlu await agar UI lebih cepat)
             db.from('users').update({ status_login: true }).eq('id', data.id).then();
 
-            // 4. Tutup modal PIN jika ada
             const pinModal = Utils.getEl('modal-pin');
             if(pinModal) pinModal.classList.add('hidden');
 
-            // --- OPTIMASI UX DIMULAI DI SINI ---
-            
-            // A. Tampilkan Modal Sukses SEGERA
             View.modals.showSuccess("Berhasil masuk!");
 
-            // B. [PENTING] Mulai ambil data Dashboard DI BACKGROUND saat user melihat animasi
-            // Kita tidak menunggu ini selesai, biarkan dia jalan paralel.
             if (window.supabase) {
                 RealtimeFeatures.initPresence(); 
                 View.updateDashboard(); 
             }
 
-            // C. Timer Pendek (800ms / 0.8 Detik)
-            // Cukup untuk efek visual "sret" tanpa membuat user menunggu lama
             setTimeout(() => {
                 View.modals.closeSuccess();
-                this.setSessionUI(); // Pindah layar
+                this.setSessionUI(); 
             }, 800); 
 
         } catch (err) {
             View.modals.showError("Gagal Masuk", "Username atau Password salah.");
             Utils.setLoading(btn, false, "Masuk");
         } finally {
-            // Biarkan tombol disable saat sukses transisi
             if (!localStorage.getItem('cbt_user_session')) {
                 Utils.setLoading(btn, false, "Masuk");
             }
@@ -325,20 +314,17 @@ const Auth = {
         const viewLogin = Utils.getEl('view-login');
         const viewAdmin = Utils.getEl('view-admin');
         
-        // Transisi Halus (Opsional, jika CSS mendukung transition)
         if(viewLogin) {
             viewLogin.style.opacity = '0';
             setTimeout(() => {
                 viewLogin.classList.add('hidden-view');
                 if(viewAdmin) {
                     viewAdmin.classList.remove('hidden-view');
-                    // Trik CSS agar fade-in jalan
                     setTimeout(() => viewAdmin.style.opacity = '1', 50);
                 }
                 View.nav('dashboard');
-            }, 300); // Sesuai durasi transisi CSS (biasanya 0.3s)
+            }, 300); 
         } else {
-            // Fallback jika tidak ada elemen view-login (langsung switch)
             if(viewAdmin) viewAdmin.classList.remove('hidden-view');
             View.nav('dashboard');
         }
@@ -353,7 +339,8 @@ const View = {
         document.querySelectorAll('.admin-panel').forEach(p => p.classList.add('hidden-view'));
         const target = Utils.getEl('panel-' + panelId) || Utils.getEl(panelId);
         if (target) target.classList.remove('hidden-view');
-                // Tambahkan ini di bagian if:
+
+        // [PENTING] Handler untuk Riwayat Koneksi
         if (panelId === 'connections') this.renderConnections();
 
         document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active-nav'));
@@ -381,51 +368,44 @@ const View = {
             overlay.classList.toggle('hidden');
         }
     },
-    // Di dalam const View = { ... }
 
     async updateDashboard() {
-        // 1. AMBIL ELEMEN TOMBOL & IKON
         const btn = Utils.getEl('btn-refresh-dash');
         const icon = Utils.getEl('icon-refresh');
         const text = Utils.getEl('text-refresh');
 
-        // 2. FEEDBACK VISUAL INSTAN (Agar terasa responsif)
-        if (icon) icon.classList.add('animate-spin'); // Putar ikon
-        if (text) text.innerText = "Updating...";     // Ganti teks
-        if (btn) btn.classList.add('bg-slate-100', 'text-blue-600'); // Ubah warna
+        if (icon) icon.classList.add('animate-spin'); 
+        if (text) text.innerText = "Updating...";     
+        if (btn) btn.classList.add('bg-slate-100', 'text-blue-600'); 
 
-        // 3. Set Loading Text pada Angka (Indikator data sedang diambil)
         const ids = [
             'stat-students', 'stat-online', 'stat-classes', 'stat-rooms', 
             'stat-exams', 'stat-exams-active', 'stat-proctor-total', 
             'stat-proctor-online', 'stat-admin-total', 'stat-admin-online', 
             'stat-http', 'stat-active-devices'
         ];
-        // Jangan reset jadi "..." jika ingin angka lama tetap terlihat sampai angka baru muncul
-        // Tapi jika ingin efek loading, biarkan baris di bawah ini:
+        
         ids.forEach(id => { if(Utils.getEl(id)) Utils.getEl(id).innerText = "..."; });
 
         try {
-            // 4. FETCH DATA (Paralel)
             const [
                 totalSiswa, siswaOnline,
                 totalPengawas, pengawasOnline,
                 totalAdmin, adminOnline,
                 totalKelas, totalRuang,
                 totalUjian, ujianAktif,
-                realHttpHits,          
-                totalRecordedDevices   
+                realHttpHits,           
+                totalRecordedDevices    
             ] = await Promise.all([
                 DB.getCount('students'), DB.getStudentOnline(),
                 DB.getUserTotalByRole('pengawas'), DB.getUserOnline('pengawas'),
                 DB.getUserTotalByRole('admin'), DB.getUserOnline('admin'),
                 DB.getCount('classes'), DB.getCount('rooms'),
                 DB.getCount('exams'), DB.getActiveExams(),
-                DB.getSiteStats(),           
-                DB.getCount('device_logs')   
+                DB.getSiteStats(),            
+                DB.getCount('device_logs')    
             ]);
 
-            // 5. UPDATE UI
             const map = {
                 'stat-students': totalSiswa, 'stat-online': siswaOnline,
                 'stat-proctor-total': totalPengawas, 'stat-proctor-online': pengawasOnline,
@@ -443,14 +423,12 @@ const View = {
         } catch (e) { 
             console.error("Gagal update dashboard:", e); 
         } finally {
-            // 6. KEMBALIKAN TOMBOL KE KEADAAN SEMULA
-            // (Dijalankan baik sukses maupun gagal)
             if (icon) icon.classList.remove('animate-spin');
             if (text) text.innerText = "Refresh";
             if (btn) btn.classList.remove('bg-slate-100', 'text-blue-600');
         }
     },
-    // --- Render Tables (Fitur Dropdown & Edit Sudah Diperbaiki) ---
+
     async renderStudents(useCache = false) {
         const tbody = Utils.getEl('table-students-body');
         if (!useCache || STATE.cache.students.length === 0) {
@@ -587,7 +565,6 @@ const View = {
         feather.replace();
     },
 
-    // --- Tab Switching ---
     switchBankTab(tab) {
         ['view-bank-soal', 'view-bank-ujian', 'view-exam-detail', 'view-exam-participants'].forEach(id => Utils.getEl(id).classList.add('hidden-view'));
         ['tab-soal', 'tab-ujian'].forEach(id => Utils.getEl(id).classList.remove('active'));
@@ -604,9 +581,6 @@ const View = {
         if (e && e.currentTarget) e.currentTarget.classList.add('active');
     },
 
-   // ... kode sebelumnya di dalam View ...
-
-    // --- Modal Managers ---
     modals: {
         openEditClass(id = null) {
             STATE.editing.classId = id;
@@ -637,27 +611,20 @@ const View = {
         showSuccess(msg) {
             const modal = Utils.getEl('modal-success');
             Utils.getEl('msg-success').innerText = msg;
-            
             modal.classList.remove('hidden');
-            
-            // Animasi Fade In (Overlay & Panel)
             setTimeout(() => {
                 modal.querySelector('.bg-slate-900\\/40').classList.remove('opacity-0');
                 modal.querySelector('.relative').classList.remove('scale-95', 'opacity-0');
                 modal.querySelector('.relative').classList.add('scale-100', 'opacity-100');
             }, 10);
         },
-        // [BARU] Fungsi menutup modal sukses dengan animasi Fade Out
+
         closeSuccess() {
             const modal = Utils.getEl('modal-success');
             if(!modal) return;
-
-            // Animasi Fade Out
             modal.querySelector('.bg-slate-900\\/40').classList.add('opacity-0');
             modal.querySelector('.relative').classList.remove('scale-100', 'opacity-100');
             modal.querySelector('.relative').classList.add('scale-95', 'opacity-0');
-            
-            // Sembunyikan setelah animasi selesai (300ms)
             setTimeout(() => modal.classList.add('hidden'), 300);
         },
 
@@ -673,7 +640,7 @@ const View = {
         },
         closePin() { Utils.getEl('modal-pin').classList.add('hidden'); }
     },
-    // ... sisa kode View ..
+
     openExamDetail(name) {
         Utils.getEl('view-bank-ujian').classList.add('hidden-view');
         Utils.getEl('view-exam-detail').classList.remove('hidden-view');
@@ -699,7 +666,7 @@ const View = {
         Utils.getEl('panel-questions').classList.remove('hidden-view');
         this.switchBankTab('ujian');
     },
-    // Fungsi Render Tabel Koneksi
+
     async renderConnections() {
         const tbody = Utils.getEl('table-connections-body');
         tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8"><span class="animate-spin">⏳</span> Memuat data perangkat...</td></tr>`;
@@ -774,7 +741,7 @@ const ClassController = {
         
         let res = isEdit ? await DB.updateClass(isEdit, { nama_kelas: name, deskripsi: desc }) 
                          : await DB.addClass({ nama_kelas: name, kode_kelas: "KLS-"+Date.now(), deskripsi: desc });
-                         
+                          
         Utils.setLoading(btn, false);
         if(!res.error) {
             View.modals.closeEditClass();
@@ -796,7 +763,7 @@ const RoomController = {
         
         let res = isEdit ? await DB.updateRoom(isEdit, { nama_ruangan: name, deskripsi: desc })
                          : await DB.addRoom({ nama_ruangan: name, kode_ruangan: "R-"+Date.now(), deskripsi: desc });
-                         
+                          
         Utils.setLoading(btn, false);
         if(!res.error) {
             View.modals.closeEditRoom();
@@ -924,67 +891,47 @@ const RealtimeFeatures = {
         } catch(e) { alert(e.message); } 
         finally { btn.innerHTML = `<i data-feather="refresh-cw" class="w-4 h-4"></i> Generate Baru`; btn.disabled = false; feather.replace(); }
     },
-async initPresence() {
-        // 1. BERSIHKAN KONEKSI LAMA (PENTING AGAR TIDAK STUCK)
+    async initPresence() {
         if (STATE.realtime && STATE.realtime.presenceChannel) {
             await STATE.realtime.presenceChannel.unsubscribe();
             db.removeChannel(STATE.realtime.presenceChannel);
             STATE.realtime.presenceChannel = null;
         }
 
-        // 2. Ambil Data Baru
         const session = JSON.parse(localStorage.getItem('cbt_user_session'));
         const myRole = session ? session.role : 'guest'; 
         const myUsername = session ? session.username : 'anon';
 
-        // 3. Buat Koneksi Baru
         const room = db.channel('online_users_room', {
             config: { presence: { key: myUsername + '-' + Date.now() } },
         });
 
-        // Simpan ke STATE agar bisa dihapus nanti
         if (!STATE.realtime) STATE.realtime = {};
         STATE.realtime.presenceChannel = room;
 
-        // 4. Dengarkan Perubahan (Orang lain masuk/keluar)
-room.on('presence', { event: 'sync' }, () => {
+    room.on('presence', { event: 'sync' }, () => {
             const state = room.presenceState();
             const allUsers = Object.values(state).flat();
 
-            // --- 1. LOGIKA BARU: HITUNG PERANGKAT UNIK (BAGIAN C) ---
-            // Menghitung jumlah user unik (Active Devices)
-            // Menggunakan Set() untuk membuang duplikat username (misal: 1 user buka 2 tab)
             const uniqueDeviceSet = new Set(allUsers.map(u => u.username));
             const totalUniqueDevices = uniqueDeviceSet.size;
 
-            // --- 2. LOGIKA LAMA (DITINGKATKAN) ---
-            // Menghitung Role secara Unik (Agar akurat jika admin buka di HP & Laptop)
             const countAdmin = new Set(allUsers.filter(u => u.userRole === 'admin').map(u => u.username)).size;
             const countPengawas = new Set(allUsers.filter(u => u.userRole === 'pengawas').map(u => u.username)).size;
-            
-            // Filter Siswa: Hanya menghitung role 'siswa' (bukan tamu/guest)
             const countSiswa = new Set(allUsers.filter(u => u.userRole === 'siswa').map(u => u.username)).size;
-            
-            // Total Raw Socket (Jumlah Tab Terbuka) - Tetap dipertahankan
             const totalSocket = allUsers.length;
 
-            // --- 3. UPDATE UI (TAMPILAN) ---
-            
-            // Update Data Per Role (Fungsi Lama Tetap Jalan)
             if(Utils.getEl('stat-admin-online')) Utils.getEl('stat-admin-online').innerText = countAdmin;
             if(Utils.getEl('stat-proctor-online')) Utils.getEl('stat-proctor-online').innerText = countPengawas;
             if(Utils.getEl('stat-online')) Utils.getEl('stat-online').innerText = countSiswa;
             
-            // Update Angka Besar (Total Socket / Tab Browser)
             if(Utils.getEl('stat-socket')) Utils.getEl('stat-socket').innerText = totalSocket;
 
-            // [BARU] Update Angka Kecil (Perangkat Online Realtime)
             if(Utils.getEl('stat-active-devices')) {
                 Utils.getEl('stat-active-devices').innerText = totalUniqueDevices;
             }
         });
 
-        // 5. Kirim Sinyal "SAYA ONLINE"
         room.subscribe(async (status) => {
             if (status === 'SUBSCRIBED') {
                 await room.track({
@@ -998,20 +945,16 @@ room.on('presence', { event: 'sync' }, () => {
 
     async initTraffic() {
         try {
-            // Menambah counter +1 di database setiap kali halaman dibuka
             await db.rpc('increment_hit');
         } catch (err) { console.warn("Setup increment_hit di Supabase dulu."); }
 
-        // Dengarkan perubahan realtime pada tabel site_stats
         db.channel('public:site_stats')
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'site_stats'}, (payload) => {
-                // [UBAH INI] Update angka besar jika ada perubahan di DB
                 if(Utils.getEl('stat-total-hits')) {
                     Utils.getEl('stat-total-hits').innerText = payload.new.total_hits;
                 }
         }).subscribe();
         
-        // Load data awal
         const { data } = await db.from('site_stats').select('total_hits').eq('id', 1).single();
         if(data && Utils.getEl('stat-total-hits')) {
             Utils.getEl('stat-total-hits').innerText = data.total_hits;
@@ -1027,10 +970,10 @@ const App = {
         console.log("CBT Pro Enterprise Loaded.");
         Auth.init();
         RealtimeFeatures.init();
-        // --- TAMBAHAN BARU: REKAM JEJAK ---
+        
         DB.incrementHit(); // Tambah counter HTTP
         DB.logDevice();    // Rekam Perangkat
-        // ----------------------------------
+        
         this.runTicker();
         if (typeof feather !== 'undefined') feather.replace();
         setInterval(() => {
@@ -1063,7 +1006,6 @@ window.fetchAdminData = () => View.renderStudents(true);
 window.saveStudentData = () => StudentController.save();
 window.toggleAllStudents = (src) => document.querySelectorAll('.student-checkbox').forEach(c => c.checked = src.checked);
 
-// [RESTORED] Logika Dropdown agar tidak konflik
 window.toggleActionDropdown = (i, e) => { 
     e.stopPropagation(); 
     document.querySelectorAll('.action-dropdown').forEach(d => d.classList.remove('show')); 
@@ -1120,7 +1062,7 @@ window.toggleFullScreen = () => { if(!document.fullscreenElement) document.docum
 window.toggleProfileMenu = (e) => { e.stopPropagation(); Utils.getEl('profile-dropdown').classList.toggle('hidden'); };
 
 // Modal Close Animations
-window.closeSuccessModal = () => View.modals.closeSuccess(); // Menggunakan fungsi terpusat di View 
+window.closeSuccessModal = () => View.modals.closeSuccess(); 
 window.closeErrorModal = () => {
     const modal = Utils.getEl('modal-error');
     modal.classList.add('opacity-0');
@@ -1148,26 +1090,4 @@ window.updateCardSignature = () => {};
 
 // Start App
 document.addEventListener("DOMContentLoaded", () => App.init());
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
