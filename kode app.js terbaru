@@ -1,0 +1,893 @@
+/**
+ * CBT Pro v4.2 - High Performance Edition
+ * Dioptimalkan oleh: Professional Developer
+ * Fokus: Kecepatan Muat, Penghematan Resource, dan UI Responsif.
+ */
+
+// ============================================================================
+// 1. KONFIGURASI & STATE (TERPUSAT)
+// ============================================================================
+const CONFIG = {
+    SUPABASE_URL: 'https://vgemkulcjnpjquabhguv.supabase.co',
+    SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnZW1rdWxjam5wanF1YWJoZ3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4MzUwNTEsImV4cCI6MjA4MDQxMTA1MX0.Z0NxOpNZAhuNlFuR_2h0uRLD8x4gYNpEI9veHNCxKxQ',
+    TICKER_MESSAGES: [
+        { text: '<span class="text-yellow-400 font-bold mr-2">[INFO UJIAN]</span> Selamat Datang di Portal Ujian CBT Pro.', anim: 'anim-scroll', duration: 20000 },
+        { text: '<span class="text-blue-400 font-bold mr-2">[BANTUAN]</span> Jika terkendala hubungi Admin.', anim: 'anim-center-expand', duration: 10000 }
+    ]
+};
+
+const db = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
+
+const STATE = {
+    editing: { classId: null, roomId: null, examId: null, pendingDeleteId: null, pendingDeleteType: null },
+    ui: { tickerIndex: 0, cardLogo: "https://via.placeholder.com/50", cardSignature: "", selectedStudentIds: [] },
+    cache: { students: [], classes: [], rooms: [], questions: [], exams: [], recap: [], dashboard: null },
+    intervals: { tokenTimer: null },
+    realtime: { presenceChannel: null }
+};
+
+// ============================================================================
+// 2. UTILITIES (PENGHEMAT MEMORI)
+// ============================================================================
+const Utils = {
+    escapeHTML(str) {
+        if (!str) return '';
+        return String(str).replace(/[&<>'"]/g, tag => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        }[tag]));
+    },
+
+    getEl(id) { return document.getElementById(id); },
+
+    setLoading(btn, isLoading, text = 'Loading...') {
+        if (!btn) return;
+        if (isLoading) {
+            btn.dataset.originalText = btn.innerHTML;
+            btn.innerHTML = `<span class="animate-spin inline-block">⏳</span> ${text}`;
+            btn.disabled = true;
+            btn.classList.add('opacity-75', 'cursor-not-allowed');
+        } else {
+            btn.innerHTML = btn.dataset.originalText || 'Simpan';
+            btn.disabled = false;
+            btn.classList.remove('opacity-75', 'cursor-not-allowed');
+        }
+    },
+
+    fmtDate(dateString) {
+        if (!dateString) return '-';
+        return new Date(dateString).toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    },
+
+    async loadScript(src) {
+        return new Promise((resolve, reject) => {
+            if (document.querySelector(`script[src="${src}"]`)) return resolve();
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    },
+
+    async ensureExcelLib() {
+        const btn = document.getElementById('btn-export');
+        if(btn) this.setLoading(btn, true, "Menyiapkan...");
+        await Promise.all([
+            this.loadScript('https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js'),
+            this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js')
+        ]);
+        if(btn) this.setLoading(btn, false);
+    }
+};
+
+// ============================================================================
+// 3. SERVICE LAYER (OPTIMASI QUERY)
+// ============================================================================
+const DB = {
+    async getStudents(page = 1, limit = 50) {
+        const from = (page - 1) * limit;
+        const to = from + limit - 1;
+        const { data, error } = await db.from('students').select('*').order('created_at', { ascending: false }).range(from, to);
+        if (error) return [];
+        return data.map(s => ({
+            id: s.id, username: s.username || '-', nama: s.nama_lengkap || s.nama || '(Tanpa Nama)',
+            id_peserta: s.id_peserta || '-', pass: s.password || '123456',
+            kelas: s.kelas || '-', ruangan: s.ruangan || '-', sesi: s.sesi || '1',
+            sekolah: s.sekolah || '-', agama: s.agama || '-', catatan: s.catatan || '-'
+        }));
+    },
+
+    async getClasses() {
+        const { data } = await db.from('classes').select('*');
+        return (data || []).map(c => ({ id: c.id, code: c.kode_kelas, name: c.nama_kelas, desc: c.deskripsi || '-', count: 0, date: 'Terdaftar' }));
+    },
+
+    async getRooms() {
+        const { data } = await db.from('rooms').select('*');
+        return (data || []).map(r => ({ id: r.id, code: r.kode_ruangan, name: r.nama_ruangan, desc: r.deskripsi || '-', count: 0, date: 'Terdaftar' }));
+    },
+
+    async getExams() {
+        const { data } = await db.from('exams').select('*').order('created_at', { ascending: false });
+        return (data || []).map(e => ({
+            id: e.id, name: e.nama_ujian, status: e.status, alokasi: e.alokasi,
+            peserta: e.peserta || 0, pengelola: e.pengelola || 'Admin',
+            acakPaket: e.acak_paket || 'first', acakSoal: e.acak_soal || 'no',
+            acakOpsi: e.acak_opsi || 'no', tampilNilai: e.tampil_nilai || 'hide'
+        }));
+    },
+
+    // OPTIMASI: Mekanisme Dashboard Terintegrasi
+    async getDashboardStats() {
+        // Melakukan request secara paralel (Best Practice)
+        const queries = [
+            this.getCount('students'),
+            this.getCountByFilter('students', 'status_login', true),
+            this.getCountByFilter('users', 'role', 'pengawas'),
+            this.getCountByFilter('users', 'role', 'admin'),
+            this.getCount('classes'),
+            this.getCount('rooms'),
+            this.getCount('exams'),
+            this.getCountByFilter('exams', 'status', 'Aktif'),
+            db.from('site_stats').select('total_hits').limit(1).maybeSingle(),
+            this.getCount('device_logs')
+        ];
+
+        const results = await Promise.all(queries);
+        
+        return {
+            'stat-students': results[0],
+            'stat-online': results[1],
+            'stat-proctor-total': results[2],
+            'stat-admin-total': results[3],
+            'stat-classes': results[4],
+            'stat-rooms': results[5],
+            'stat-exams': results[6],
+            'stat-exams-active': results[7],
+            'stat-http': results[8].data ? results[8].data.total_hits : 0,
+            'stat-active-devices': results[9]
+        };
+    },
+
+    async getCount(table) { const { count } = await db.from(table).select('*', { count: 'exact', head: true }); return count || 0; },
+    async getCountByFilter(table, col, val) { const { count } = await db.from(table).select('*', { count: 'exact', head: true }).eq(col, val); return count || 0; },
+    async getStudentOnline() { return this.getCountByFilter('students', 'status_login', true); },
+    async getUserOnline(role) { return this.getCountByFilter('users', 'role', role); },
+    async getUserTotalByRole(role) { return this.getCountByFilter('users', 'role', role); },
+    async getActiveExams() { return this.getCountByFilter('exams', 'status', 'Aktif'); },
+
+    async addStudent(data) { return await db.from('students').insert([data]); },
+    async addClass(data) { return await db.from('classes').insert([data]); },
+    async updateClass(id, data) { return await db.from('classes').update(data).eq('id', id); },
+    async deleteClass(id) { return await db.from('classes').delete().eq('id', id); },
+    async addRoom(data) { return await db.from('rooms').insert([data]); },
+    async updateRoom(id, data) { return await db.from('rooms').update(data).eq('id', id); },
+    async deleteRoom(id) { return await db.from('rooms').delete().eq('id', id); },
+    async addExam(data) { return await db.from('exams').insert([data]); },
+    async updateExam(id, data) { return await db.from('exams').update(data).eq('id', id); },
+    async deleteExam(id) { return await db.from('exams').delete().eq('id', id); },
+    async addQuestion(data) { return await db.from('questions').insert([data]); },
+    
+    async incrementHit() { await db.rpc('increment_hit'); },
+
+    async getDeviceLogs() {
+        const { data } = await db.from('device_logs').select('*').order('last_seen', { ascending: false }).limit(50);
+        return data || [];
+    },
+
+    async getDeviceHistory(deviceId) {
+        const { data } = await db.from('access_history').select('*').eq('device_id', deviceId).order('accessed_at', { ascending: false }).limit(20);
+        return data || [];
+    },
+
+    async logDevice() {
+        let deviceId = localStorage.getItem('cbt_device_id');
+        if (!deviceId) {
+            deviceId = 'DEV-' + Math.random().toString(36).substr(2, 9).toUpperCase();
+            localStorage.setItem('cbt_device_id', deviceId);
+        }
+
+        const ua = navigator.userAgent;
+        let deviceName = ua.includes("Win") ? "Windows PC" : ua.includes("Android") ? "Android" : ua.includes("iPhone") ? "iPhone" : ua.includes("Mac") ? "Macbook" : "Unknown";
+        if (ua.includes("Chrome")) deviceName += " (Chrome)";
+
+        const ip = localStorage.getItem('last_ip') || '-';
+        const loc = localStorage.getItem('last_loc') || '-';
+
+        try {
+            await db.rpc('record_device_visit', { p_device_id: deviceId, p_device_name: deviceName, p_ip_address: ip, p_location: loc });
+            await db.rpc('increment_hit'); 
+        } catch(e) {}
+
+        // Background Check IP
+        setTimeout(async () => {
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                if(res.ok) {
+                    const json = await res.json();
+                    localStorage.setItem('last_ip', json.ip);
+                    await db.from('device_logs').update({ ip_address: json.ip }).eq('device_id', deviceId);
+                }
+            } catch(e) {}
+        }, 2000);
+    }
+};
+
+// ============================================================================
+// 4. AUTHENTICATION (RELIABLE SESSION)
+// ============================================================================
+const Auth = {
+    init() {
+        const sessionRaw = localStorage.getItem('cbt_user_session');
+        if (sessionRaw) {
+            const session = JSON.parse(sessionRaw);
+            this.setSessionUI(session);
+            // Refresh login status secara silent
+            db.from('users').update({ status_login: true }).eq('id', session.id).then();
+        }
+    },
+
+    async login(userIdID, passID, btnID) {
+        const userInput = Utils.getEl(userIdID);
+        const passInput = Utils.getEl(passID);
+        const btn = Utils.getEl(btnID);
+
+        const userVal = userInput?.value.trim() || '';
+        const passVal = passInput?.value.trim() || '';
+
+        if (!userVal || !passVal) return View.modals.showError("Gagal", "Lengkapi data!");
+
+        Utils.setLoading(btn, true, "Verifikasi...");
+
+        try {
+            const { data, error } = await db.from('users').select('id, username, role').eq('username', userVal).eq('password', passVal).maybeSingle();
+            if (error || !data) throw new Error("Kredensial Salah");
+
+            const session = { id: data.id, username: data.username, role: data.role };
+            localStorage.setItem('cbt_user_session', JSON.stringify(session));
+            
+            await db.from('users').update({ status_login: true }).eq('id', data.id);
+            Utils.getEl('modal-pin')?.classList.add('hidden');
+
+            View.modals.showSuccess("Selamat Datang!");
+
+            // Init Realtime segera setelah login
+            RealtimeFeatures.init();
+            
+            setTimeout(() => {
+                View.modals.closeSuccess();
+                this.setSessionUI(session);
+            }, 800);
+
+        } catch (err) {
+            View.modals.showError("Akses Ditolak", "Username atau Password salah.");
+        } finally {
+            Utils.setLoading(btn, false, "Masuk");
+        }
+    },
+
+    logout() {
+        const session = JSON.parse(localStorage.getItem('cbt_user_session'));
+        if (session) {
+            db.from('users').update({ status_login: false }).eq('id', session.id).then(() => {
+                localStorage.removeItem('cbt_user_session');
+                location.reload();
+            });
+        } else { location.reload(); }
+    },
+
+    setSessionUI(session) {
+        const viewLogin = Utils.getEl('view-login');
+        const viewAdmin = Utils.getEl('view-admin');
+        
+        if(viewLogin) {
+            viewLogin.style.opacity = '0';
+            setTimeout(() => {
+                viewLogin.classList.add('hidden-view');
+                if(viewAdmin) {
+                    viewAdmin.classList.remove('hidden-view');
+                    setTimeout(() => viewAdmin.style.opacity = '1', 50);
+                }
+                View.nav('dashboard');
+            }, 300); 
+        } else {
+            if(viewAdmin) viewAdmin.classList.remove('hidden-view');
+            View.nav('dashboard');
+        }
+    }
+};
+
+// ============================================================================
+// 5. VIEW CONTROLLER (RESPONSIVE RENDERING)
+// ============================================================================
+const View = {
+    nav(panelId) {
+        const panels = document.querySelectorAll('.admin-panel');
+        panels.forEach(p => p.classList.add('hidden-view'));
+        
+        const target = Utils.getEl('panel-' + panelId) || Utils.getEl(panelId);
+        if (target) target.classList.remove('hidden-view');
+
+        // Nav Active State
+        document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active-nav'));
+        const activeBtn = Utils.getEl('nav-' + panelId);
+        if (activeBtn) activeBtn.classList.add('active-nav');
+
+        // Mobile Sidebar Close
+        if (window.innerWidth < 768) {
+            Utils.getEl('sidebar')?.classList.add('-translate-x-full');
+            Utils.getEl('sidebar-overlay')?.classList.add('hidden');
+        }
+
+        // Logic routing halaman
+        this.onPageVisible(panelId);
+    },
+
+    onPageVisible(panelId) {
+        switch(panelId) {
+            case 'dashboard': this.updateDashboard(); break;
+            case 'students': this.renderStudents(false); break;
+            case 'connections': this.renderConnections(); break;
+            case 'classes': this.renderClasses(); break;
+            case 'rooms': this.renderRooms(); break;
+            case 'questions': this.switchBankTab('soal'); this.renderQuestions(); break;
+        }
+    },
+
+    toggleSidebar() {
+        Utils.getEl('sidebar')?.classList.toggle('-translate-x-full');
+        Utils.getEl('sidebar-overlay')?.classList.toggle('hidden');
+    },
+
+    // OPTIMASI: Dashboard dengan Stale-While-Revalidate
+    async updateDashboard(forceFetch = false) {
+        // 1. Tampilkan Cache Segera (Tanpa Menunggu)
+        const cached = JSON.parse(localStorage.getItem('dashboard_cache'));
+        if (cached) {
+            Object.entries(cached).forEach(([key, val]) => {
+                const el = Utils.getEl(key);
+                if(el) el.innerText = val;
+            });
+        }
+
+        const icon = Utils.getEl('icon-refresh');
+        if(icon) icon.classList.add('animate-spin');
+
+        // 2. Fetch di Background
+        try {
+            const freshData = await DB.getDashboardStats();
+            localStorage.setItem('dashboard_cache', JSON.stringify(freshData));
+            Object.entries(freshData).forEach(([key, val]) => {
+                const el = Utils.getEl(key);
+                if(el) el.innerText = val;
+            });
+        } catch(e) { 
+            console.error("Dashboard Sync Error", e); 
+        } finally {
+            if(icon) icon.classList.remove('animate-spin');
+        }
+    },
+
+    async renderConnections() {
+        const tbody = Utils.getEl('table-connections-body');
+        if (!tbody.hasChildNodes() || tbody.innerHTML.includes("Memuat")) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8"><span class="animate-spin">⏳</span> Sinkronisasi...</td></tr>`;
+        }
+        
+        const logs = await DB.getDeviceLogs();
+        if(logs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4">Belum ada riwayat masuk.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = logs.map((log, i) => `
+            <tr class="border-b hover:bg-slate-50 transition cursor-pointer" onclick="View.showDeviceHistory('${log.device_id}')">
+                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
+                <td class="px-4 py-3 font-mono font-bold text-blue-600 text-xs">${Utils.escapeHTML(log.device_id)}</td>
+                <td class="px-4 py-3 text-[10px] flex items-center gap-2">
+                    <i data-feather="monitor" class="w-3 h-3 text-slate-400"></i> ${Utils.escapeHTML(log.device_name)}
+                </td>
+                <td class="px-4 py-3 font-mono text-[10px]">${Utils.escapeHTML(log.ip_address)}</td>
+                <td class="px-4 py-3 text-[10px]">${Utils.fmtDate(log.last_seen)}</td>
+                <td class="px-4 py-3 text-center"><span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold text-[10px]">${log.visit_count}x</span></td>
+            </tr>
+        `).join('');
+        feather.replace();
+    },
+
+    async showDeviceHistory(deviceId) {
+        const modal = Utils.getEl('modal-device-detail');
+        const tbody = Utils.getEl('table-device-history');
+        const title = Utils.getEl('detail-device-id');
+        
+        if(title) title.innerText = "Detail Log: " + deviceId;
+        if(tbody) tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center">Tunggu...</td></tr>`;
+        if(modal) modal.classList.remove('hidden');
+
+        const history = await DB.getDeviceHistory(deviceId);
+        if (history.length === 0) {
+            if(tbody) tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center">Riwayat tidak ditemukan.</td></tr>`;
+        } else {
+            if(tbody) tbody.innerHTML = history.map(h => `
+                <tr class="border-b text-[11px]">
+                    <td class="px-5 py-3 font-mono">${Utils.fmtDate(h.accessed_at)}</td>
+                    <td class="px-5 py-3">${Utils.escapeHTML(h.ip_address)}</td>
+                    <td class="px-5 py-3 text-blue-600 font-bold">${Utils.escapeHTML(h.location || '-')}</td>
+                </tr>
+            `).join('');
+        }
+    },
+
+    async renderStudents(useCache = false) {
+        const tbody = Utils.getEl('table-students-body');
+        if (!useCache || STATE.cache.students.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8"><span class="animate-spin">⏳</span> Mengambil Data Siswa...</td></tr>`;
+            STATE.cache.students = await DB.getStudents();
+        }
+        
+        const html = STATE.cache.students.map((s, i) => `
+            <tr class="border-b hover:bg-slate-50 transition group-row">
+                <td class="px-2 py-3 text-center"><input type="checkbox" class="student-checkbox rounded border-slate-300 w-3.5 h-3.5" value="${Utils.escapeHTML(s.id_peserta)}"></td>
+                <td class="px-2 py-3 text-center relative">
+                    <button onclick="toggleActionDropdown(${i}, event)" class="bg-blue-50 p-1 rounded hover:bg-blue-100 text-blue-600"><i data-feather="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                    <div id="dropdown-${i}" class="action-dropdown text-left z-50">
+                        <button onclick="View.nav('add-student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50">Edit Data</button>
+                        <button onclick="View.modals.confirmDelete('${Utils.escapeHTML(s.id_peserta)}', 'student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 font-bold">Hapus</button>
+                    </div>
+                </td>
+                <td class="px-2 py-3 text-center text-[10px]">${i + 1}</td>
+                <td class="px-2 py-3 font-mono text-xs">${Utils.escapeHTML(s.username)}</td>
+                <td class="px-2 py-3 font-mono text-xs">***</td>
+                <td class="px-2 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(s.nama)}</td>
+                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.id_peserta)}</td>
+                <td class="px-2 py-3"><span class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.kelas)}</span></td>
+                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.ruangan)}</td>
+                <td class="px-2 py-3 text-center"><span class="bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.sesi)}</span></td>
+                <td class="px-2 py-3 text-[10px]">${Utils.escapeHTML(s.sekolah)}</td>
+                <td class="px-2 py-3 text-[10px]">${Utils.escapeHTML(s.agama)}</td>
+                <td class="px-2 py-3 text-[10px] italic text-slate-400">${Utils.escapeHTML(s.catatan)}</td>
+            </tr>`).join('');
+        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-4 text-xs">Database Siswa Kosong.</td></tr>`;
+        feather.replace();
+    },
+
+    async renderClasses() {
+        const tbody = Utils.getEl('table-classes-body');
+        STATE.cache.classes = await DB.getClasses();
+        tbody.innerHTML = STATE.cache.classes.map((item, i) => `
+            <tr class="border-b hover:bg-slate-50 transition">
+                <td class="px-4 py-3 text-center"><input type="checkbox" class="w-3.5 h-3.5"></td>
+                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
+                <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
+                <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
+                <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
+                <td class="px-4 py-3 text-xs font-bold text-blue-600">(${item.count}) Peserta</td>
+                <td class="px-4 py-3 text-[10px]">${item.date}</td>
+                <td class="px-4 py-3 text-center">
+                    <div class="flex items-center justify-center gap-2">
+                        <button onclick="View.modals.openEditClass('${item.id}')" class="bg-blue-600 text-white text-[10px] px-2 py-1 rounded hover:bg-blue-700">Edit</button>
+                        <button onclick="View.modals.confirmDelete('${item.id}', 'class')" class="bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded hover:bg-red-100">Hapus</button>
+                    </div>
+                </td>
+            </tr>`).join('');
+        feather.replace();
+    },
+
+    async renderRooms() {
+        const tbody = Utils.getEl('table-rooms-body');
+        STATE.cache.rooms = await DB.getRooms();
+        tbody.innerHTML = STATE.cache.rooms.map((item, i) => `
+            <tr class="border-b hover:bg-slate-50 transition">
+                <td class="px-4 py-3 text-center"><input type="checkbox" class="w-3.5 h-3.5"></td>
+                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
+                <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
+                <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
+                <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
+                <td class="px-4 py-3 text-xs font-bold text-blue-600">(${item.count}) Peserta</td>
+                <td class="px-4 py-3 text-[10px]">${item.date}</td>
+                <td class="px-4 py-3 text-center">
+                    <div class="flex items-center justify-center gap-2">
+                        <button onclick="View.modals.openEditRoom('${item.id}')" class="bg-blue-600 text-white text-[10px] px-2 py-1 rounded hover:bg-blue-700">Edit</button>
+                        <button onclick="View.modals.confirmDelete('${item.id}', 'room')" class="bg-red-50 text-red-600 text-[10px] px-2 py-1 rounded hover:bg-red-100">Hapus</button>
+                    </div>
+                </td>
+            </tr>`).join('');
+        feather.replace();
+    },
+
+    async renderExamList() {
+        const container = Utils.getEl('exam-list-body');
+        container.innerHTML = `<tr><td colspan="8" class="text-center py-8">⏳ Menyinkronkan Daftar Ujian...</td></tr>`;
+        STATE.cache.exams = await DB.getExams();
+        
+        container.innerHTML = STATE.cache.exams.map((ex, i) => {
+            const statusClass = ex.status === 'Aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500';
+            return `
+            <tr class="border-b hover:bg-slate-50 transition-colors">
+                <td class="w-24 text-center py-3 relative">
+                    <div class="inline-flex rounded-md shadow-sm">
+                        <button onclick="View.openExamDetail('${Utils.escapeHTML(ex.name)}')" class="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-l-lg hover:bg-blue-700">Detail</button>
+                        <button onclick="toggleActionDropdown('exam-${i}', event)" class="px-2 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-r-lg border-l border-blue-700 hover:bg-blue-700"><i data-feather="chevron-down" class="w-3 h-3"></i></button>
+                    </div>
+                    <div id="dropdown-exam-${i}" class="action-dropdown text-left z-50">
+                        <button onclick="View.openExamSettings('${Utils.escapeHTML(ex.name)}', ${ex.id})" class="block w-full text-left px-4 py-2 hover:bg-slate-50 text-xs">Pengaturan</button>
+                        <button onclick="ExamController.toggleStatus(${i})" class="block w-full text-left px-4 py-2 text-xs font-bold">${ex.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}</button>
+                        <button onclick="ExamController.delete(${i})" class="block w-full text-left px-4 py-2 hover:bg-red-50 text-red-500 text-xs font-bold">Hapus</button>
+                    </div>
+                </td>
+                <td class="py-3 px-4 font-bold text-xs uppercase">${Utils.escapeHTML(ex.name)}</td>
+                <td class="py-3 px-4 text-xs">(${ex.peserta}) Peserta</td>
+                <td class="py-3 px-4 text-[10px]">${Utils.escapeHTML(ex.pengelola)}</td>
+                <td class="py-3 px-4 font-mono font-bold text-xs">${Utils.escapeHTML(ex.alokasi)}</td>
+                <td class="py-3 px-4"><span class="${statusClass} px-2 py-1 rounded text-[10px] font-bold uppercase">${ex.status}</span></td>
+                <td class="py-3 px-4 text-xs">-</td>
+                <td class="py-3 px-4 text-xs">-</td>
+            </tr>`;
+        }).join('');
+        feather.replace();
+    },
+
+    renderQuestions() {
+        const tbody = Utils.getEl('question-list-body');
+        if(STATE.cache.questions.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-400">Bank Soal masih kosong.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = STATE.cache.questions.map((q, i) => `
+            <tr class="border-b">
+                <td class="px-4 py-3 text-xs">${i+1}</td>
+                <td class="px-4 py-3 text-xs truncate max-w-xs">${Utils.escapeHTML(q.text)}</td>
+                <td class="px-4 py-3"><span class="bg-blue-50 text-blue-600 px-2 py-1 rounded text-[10px] uppercase">${q.type}</span></td>
+                <td class="px-4 py-3 text-center">${q.media ? '<i data-feather="paperclip" class="w-3 h-3"></i>' : '-'}</td>
+                <td class="px-4 py-3 text-center"><button class="text-red-500 hover:bg-red-50 p-1 rounded" onclick="deleteQuestion(${i})"><i data-feather="trash-2" class="w-4 h-4"></i></button></td>
+            </tr>`).join('');
+        feather.replace();
+    },
+
+    switchBankTab(tab) {
+        ['view-bank-soal', 'view-bank-ujian', 'view-exam-detail', 'view-exam-participants'].forEach(id => Utils.getEl(id).classList.add('hidden-view'));
+        ['tab-soal', 'tab-ujian'].forEach(id => Utils.getEl(id).classList.remove('active'));
+        Utils.getEl('view-bank-'+tab).classList.remove('hidden-view');
+        Utils.getEl('tab-'+tab).classList.add('active');
+        if(tab === 'ujian') this.renderExamList();
+    },
+
+    switchSettingTab(e, tabId) {
+        document.querySelectorAll('.setting-content').forEach(c => c.classList.add('hidden-view'));
+        Utils.getEl('set-' + tabId).classList.remove('hidden-view');
+        document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
+        if (e && e.currentTarget) e.currentTarget.classList.add('active');
+    },
+
+    modals: {
+        openEditClass(id = null) { 
+            STATE.editing.classId = id; 
+            const t = STATE.cache.classes.find(c => String(c.id) === String(id)); 
+            Utils.getEl('edit-class-name').value = t ? t.name : ''; 
+            Utils.getEl('edit-class-desc').value = t ? t.desc : ''; 
+            Utils.getEl('modal-class-title').innerText = id ? "Edit Kelas" : "Tambah Kelas Baru"; 
+            Utils.getEl('modal-edit-class').classList.remove('hidden'); 
+        },
+        closeEditClass() { Utils.getEl('modal-edit-class').classList.add('hidden'); },
+        
+        openEditRoom(id = null) { 
+            STATE.editing.roomId = id; 
+            const t = STATE.cache.rooms.find(r => String(r.id) === String(id)); 
+            Utils.getEl('edit-room-name').value = t ? t.name : ''; 
+            Utils.getEl('edit-room-desc').value = t ? t.desc : ''; 
+            Utils.getEl('modal-room-title').innerText = id ? "Edit Ruangan" : "Tambah Ruangan Baru"; 
+            Utils.getEl('modal-edit-room').classList.remove('hidden'); 
+        },
+        closeEditRoom() { Utils.getEl('modal-edit-room').classList.add('hidden'); },
+        
+        confirmDelete(id, type) { STATE.editing.pendingDeleteId = id; STATE.editing.pendingDeleteType = type; Utils.getEl('modal-confirm-delete').classList.remove('hidden'); },
+        
+        showSuccess(msg) { 
+            const m = Utils.getEl('modal-success'); 
+            Utils.getEl('msg-success').innerText = msg; 
+            m.classList.remove('hidden'); 
+            setTimeout(() => { m.querySelector('.bg-slate-900\\/40').classList.remove('opacity-0'); m.querySelector('.relative').classList.remove('scale-95', 'opacity-0'); }, 10); 
+        },
+        closeSuccess() { 
+            const m = Utils.getEl('modal-success'); 
+            if(!m) return; 
+            m.querySelector('.bg-slate-900\\/40').classList.add('opacity-0'); 
+            m.querySelector('.relative').classList.add('scale-95', 'opacity-0'); 
+            setTimeout(() => m.classList.add('hidden'), 300); 
+        },
+        showError(t, m) { 
+            const mod = Utils.getEl('modal-error'); 
+            Utils.getEl('error-title').innerText = t; 
+            Utils.getEl('error-message').innerText = m; 
+            mod.classList.remove('hidden'); 
+            setTimeout(() => mod.classList.remove('opacity-0'), 10); 
+        }
+    },
+
+    openExamDetail(name) { Utils.getEl('view-bank-ujian').classList.add('hidden-view'); Utils.getEl('view-exam-detail').classList.remove('hidden-view'); Utils.getEl('detail-exam-title').innerText = name; },
+    closeExamDetail() { Utils.getEl('view-exam-detail').classList.add('hidden-view'); Utils.getEl('view-bank-ujian').classList.remove('hidden-view'); },
+    openExamSettings(n, id) { 
+        STATE.editing.examId = id; 
+        const exam = STATE.cache.exams.find(e => e.id == id); 
+        if (exam) { 
+            Utils.getEl('input-exam-name').value = exam.name; 
+            Utils.getEl('sched-alloc').value = parseInt(exam.alokasi) || 90; 
+            Utils.getEl('input-exam-status').value = (exam.status === 'Aktif') ? '1' : '0'; 
+        } 
+        Utils.getEl('panel-questions').classList.add('hidden-view'); 
+        Utils.getEl('view-exam-settings').classList.remove('hidden-view'); 
+    },
+    closeExamSettings() { Utils.getEl('view-exam-settings').classList.add('hidden-view'); Utils.getEl('panel-questions').classList.remove('hidden-view'); this.switchBankTab('ujian'); }
+};
+
+// ============================================================================
+// 6. BUSINESS LOGIC (CONTROLLERS)
+// ============================================================================
+const StudentController = {
+    async save() {
+        const btn = document.querySelector('button[onclick="saveStudentData()"]');
+        const data = {
+            nama_lengkap: Utils.getEl('input-nama').value, id_peserta: Utils.getEl('input-id-peserta').value,
+            username: Utils.getEl('input-username').value, password: Utils.getEl('input-password').value,
+            kelas: Utils.getEl('input-kelas').value, ruangan: Utils.getEl('input-ruangan').value, sesi: Utils.getEl('input-sesi').value
+        };
+        if (!data.nama_lengkap) return alert("Nama Lengkap wajib diisi.");
+        Utils.setLoading(btn, true);
+        const { error } = await DB.addStudent(data);
+        Utils.setLoading(btn, false);
+        if (!error) { View.modals.showSuccess("Data Siswa Berhasil Disimpan."); View.nav('students'); } else alert(error.message);
+    },
+
+    async exportExcel() {
+        const btn = document.querySelector('button[onclick="exportStudentsExcel()"]');
+        Utils.setLoading(btn, true, "Mengolah...");
+
+        try {
+            await Utils.ensureExcelLib();
+            const { data } = await db.from('students').select('*').order('kelas', { ascending: true });
+            
+            if (!data || data.length === 0) return alert("Data Kosong.");
+
+            const cleanData = data.map(s => ({
+                "Nama Lengkap": s.nama_lengkap, "ID Peserta": s.id_peserta, "Username": s.username,
+                "Password": s.password, "Kelas": s.kelas, "Ruangan": s.ruangan, "Sesi": s.sesi, "Sekolah": s.sekolah
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(cleanData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Data_CBT");
+            XLSX.writeFile(wb, `CBT_Siswa_${Date.now()}.xlsx`);
+            View.modals.showSuccess("Laporan Excel Berhasil Diunduh.");
+        } catch (e) { alert("Ekspor Gagal."); } 
+        finally { Utils.setLoading(btn, false, "Export Excel"); }
+    }
+};
+
+const ClassController = {
+    async save() {
+        const btn = document.querySelector('#modal-edit-class button[onclick="saveClassData()"]');
+        const name = Utils.getEl('edit-class-name').value;
+        const desc = Utils.getEl('edit-class-desc').value;
+        const isEdit = STATE.editing.classId;
+        Utils.setLoading(btn, true);
+        let res = isEdit ? await DB.updateClass(isEdit, { nama_kelas: name, deskripsi: desc }) 
+                         : await DB.addClass({ nama_kelas: name, kode_kelas: "KLS-"+Date.now(), deskripsi: desc });
+        Utils.setLoading(btn, false);
+        if(!res.error) { View.modals.closeEditClass(); View.modals.showSuccess("Data Kelas Disimpan."); View.renderClasses(); }
+    }
+};
+
+const RoomController = {
+    async save() {
+        const btn = document.querySelector('#modal-edit-room button[onclick="saveRoomData()"]');
+        const name = Utils.getEl('edit-room-name').value;
+        const desc = Utils.getEl('edit-room-desc').value;
+        const isEdit = STATE.editing.roomId;
+        Utils.setLoading(btn, true);
+        let res = isEdit ? await DB.updateRoom(isEdit, { nama_ruangan: name, deskripsi: desc })
+                         : await DB.addRoom({ nama_ruangan: name, kode_ruangan: "R-"+Date.now(), deskripsi: desc });
+        Utils.setLoading(btn, false);
+        if(!res.error) { View.modals.closeEditRoom(); View.modals.showSuccess("Data Ruangan Disimpan."); View.renderRooms(); }
+    },
+    async delete() {
+        const { pendingDeleteId: id, pendingDeleteType: type } = STATE.editing;
+        Utils.getEl('modal-confirm-delete').classList.add('hidden');
+        if(type === 'class') await DB.deleteClass(id);
+        else if(type === 'room') await DB.deleteRoom(id);
+        else if(type === 'exam') await DB.deleteExam(id);
+        else if(type === 'student') await db.from('students').delete().eq('id_peserta', id);
+        
+        View.modals.showSuccess("Item Berhasil Dihapus.");
+        View.onPageVisible(type === 'student' ? 'students' : type + 's');
+    }
+};
+
+const ExamController = {
+    async add() {
+        const name = prompt("Masukkan Nama Ujian Baru:");
+        if(name) { await DB.addExam({ nama_ujian: name, status: 'Tidak Aktif', alokasi: '90 Menit' }); View.renderExamList(); View.updateDashboard(); }
+    },
+    async toggleStatus(idx) {
+        const exam = STATE.cache.exams[idx];
+        const newStatus = exam.status === 'Aktif' ? 'Tidak Aktif' : 'Aktif';
+        await DB.updateExam(exam.id, { status: newStatus }); View.renderExamList(); View.updateDashboard();
+    },
+    async delete(idx) { const exam = STATE.cache.exams[idx]; View.modals.confirmDelete(exam.id, 'exam'); },
+    async saveSettings(section) {
+        const id = STATE.editing.examId; if(!id) return;
+        let data = (section === 'info') ? { nama_ujian: Utils.getEl('input-exam-name').value, status: (Utils.getEl('input-exam-status').value == '1') ? 'Aktif' : 'Tidak Aktif' } : {};
+        await DB.updateExam(id, data); View.modals.showSuccess("Konfigurasi Ujian Diperbarui."); View.renderExamList();
+    }
+};
+
+// ============================================================================
+// 7. REALTIME FEATURES (BATCHED UPDATES)
+// ============================================================================
+const RealtimeFeatures = {
+    init() {
+        this.initToken();
+        this.initPresence();
+        this.initTraffic();
+    },
+
+    initToken() {
+        db.channel('public:exam_settings').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exam_settings' }, (p) => { this.updateTokenUI(p.new); }).subscribe();
+        db.from('exam_settings').select('*').eq('id', 1).maybeSingle().then(({data}) => { if(data) this.updateTokenUI(data); });
+    },
+
+    updateTokenUI(data) {
+        if(Utils.getEl('dash-token')) Utils.getEl('dash-token').innerText = data.token_code;
+        if(data.expired_at) this.startTimer(new Date(data.expired_at));
+    },
+
+    startTimer(target) {
+        if(STATE.intervals.tokenTimer) clearInterval(STATE.intervals.tokenTimer);
+        const circle = document.querySelector('.progress-ring__circle');
+        const totalDuration = 15 * 60 * 1000;
+        STATE.intervals.tokenTimer = setInterval(() => {
+            const diff = target - new Date();
+            if(diff <= 0) { clearInterval(STATE.intervals.tokenTimer); if(Utils.getEl('dash-timer')) Utils.getEl('dash-timer').innerText = "EXPIRED"; return; }
+            const m = Math.floor((diff/60000)%60).toString().padStart(2,'0');
+            const s = Math.floor((diff/1000)%60).toString().padStart(2,'0');
+            if(Utils.getEl('dash-timer')) Utils.getEl('dash-timer').innerText = `${m}:${s}`;
+            if (circle) {
+                const circumference = circle.r.baseVal.value * 2 * Math.PI;
+                circle.style.strokeDashoffset = circumference - (Math.max(0, (diff/totalDuration)*100) / 100) * circumference;
+            }
+        }, 1000);
+    },
+
+    async regenerateToken() {
+        const btn = document.querySelector('button[onclick="regenerateToken()"]');
+        Utils.setLoading(btn, true, "...");
+        try {
+            const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let t = "";
+            for (let i = 0; i < 6; i++) t += chars.charAt(Math.floor(Math.random() * chars.length));
+            await db.from('exam_settings').update({ token_code: t, expired_at: new Date(Date.now() + 15 * 60000).toISOString() }).eq('id', 1);
+        } catch(e) {} 
+        finally { btn.innerHTML = `<i data-feather="refresh-cw" class="w-4 h-4"></i> Generate Baru`; btn.disabled = false; feather.replace(); }
+    },
+
+    async initPresence() {
+        if (STATE.realtime.presenceChannel) { await STATE.realtime.presenceChannel.unsubscribe(); db.removeChannel(STATE.realtime.presenceChannel); }
+        const session = JSON.parse(localStorage.getItem('cbt_user_session'));
+        const channel = db.channel('online_users_room', { config: { presence: { key: (session?.username || 'anon') + '-' + Date.now() } } });
+        STATE.realtime.presenceChannel = channel;
+
+        channel.on('presence', { event: 'sync' }, () => {
+            const users = Object.values(channel.presenceState()).flat();
+            if(Utils.getEl('stat-proctor-online')) Utils.getEl('stat-proctor-online').innerText = users.filter(u => u.role === 'pengawas').length;
+            if(Utils.getEl('stat-admin-online')) Utils.getEl('stat-admin-online').innerText = users.filter(u => u.role === 'admin').length;
+            if(Utils.getEl('stat-socket')) Utils.getEl('stat-socket').innerText = users.length;
+        });
+
+        channel.subscribe(async (s) => { if (s === 'SUBSCRIBED') await channel.track({ online: true, user: session?.username || 'anon', role: session?.role || 'guest' }); });
+    },
+
+    initTraffic() {
+        db.channel('public:site_stats').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'site_stats' }, (p) => {
+             if(Utils.getEl('stat-http')) Utils.getEl('stat-http').innerText = p.new.total_hits;
+        }).subscribe();
+
+        db.channel('public:users').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'users' }, () => {
+             View.updateDashboard(); 
+        }).subscribe();
+    }
+};
+
+// ============================================================================
+// 8. APP INITIALIZATION
+// ============================================================================
+const App = {
+    init() {
+        Auth.init();     
+        DB.logDevice();  
+        
+        if(localStorage.getItem('cbt_user_session')) {
+            RealtimeFeatures.init();
+            View.updateDashboard(); 
+        }
+
+        this.runTicker();
+        feather.replace();
+        setInterval(() => {
+            const el = Utils.getEl('admin-clock');
+            if(el) el.innerText = new Date().toLocaleTimeString('id-ID', {hour12:false});
+        }, 1000);
+    },
+
+    runTicker() {
+        const el = Utils.getEl('dynamic-ticker');
+        if(!el) return;
+        const msg = CONFIG.TICKER_MESSAGES[STATE.ui.tickerIndex];
+        el.innerHTML = msg.text;
+        el.className = 'ticker-text ' + msg.anim;
+        el.style.animation = 'none'; el.offsetHeight; el.style.animation = null; 
+        setTimeout(() => { STATE.ui.tickerIndex = (STATE.ui.tickerIndex + 1) % CONFIG.TICKER_MESSAGES.length; this.runTicker(); }, msg.duration);
+    }
+};
+
+// ============================================================================
+// 9. GLOBAL BRIDGES (HTML COMPATIBILITY)
+// ============================================================================
+window.adminNav = (id) => View.nav(id);
+window.toggleSidebar = () => View.toggleSidebar();
+window.toggleFullScreen = () => { if(!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); };
+window.toggleProfileMenu = (e) => { e.stopPropagation(); Utils.getEl('profile-dropdown').classList.toggle('hidden'); };
+window.attemptLogin = () => Auth.login('log-user', 'log-pass', 'btn-login');
+window.verifyAdminLoginReal = () => Auth.login('admin-user-input', 'admin-pass-input', 'btn-admin-login');
+window.logoutAdmin = () => Auth.logout();
+window.updateDashboardStats = () => View.updateDashboard(true);
+window.regenerateToken = () => RealtimeFeatures.regenerateToken();
+window.fetchAdminData = () => View.renderStudents(true);
+window.saveStudentData = () => StudentController.save();
+window.exportStudentsExcel = () => StudentController.exportExcel();
+window.toggleAllStudents = (src) => document.querySelectorAll('.student-checkbox').forEach(c => c.checked = src.checked);
+window.toggleActionDropdown = (i, e) => { e.stopPropagation(); document.querySelectorAll('.action-dropdown').forEach(d => d.classList.remove('show')); const t = document.getElementById(`dropdown-${i}`); if(t) t.classList.toggle('show'); };
+window.openEditClassModal = () => View.modals.openEditClass();
+window.closeEditClassModal = () => View.modals.closeEditClass();
+window.saveClassData = () => ClassController.save();
+window.openEditRoomModal = (id) => View.modals.openEditRoom(id);
+window.closeEditRoomModal = () => View.modals.closeEditRoom();
+window.saveRoomData = () => RoomController.save();
+window.prepareEditClass = (id) => View.modals.openEditClass(id);
+window.confirmDelete = (id, type) => View.modals.confirmDelete(id, type);
+window.executeDelete = () => RoomController.delete();
+window.addNewExam = () => ExamController.add();
+window.openExamDetail = (n) => View.openExamDetail(n);
+window.closeExamDetail = () => View.closeExamDetail();
+window.openExamSettings = (n, id) => View.openExamSettings(n, id);
+window.closeExamSettings = () => View.closeExamSettings();
+window.saveSpecificSettings = (s) => ExamController.saveSettings(s);
+window.switchBankTab = (t) => View.switchBankTab(t);
+window.switchSettingTab = (e, t) => View.switchSettingTab(e, t);
+window.toggleExamStatus = (i) => ExamController.toggleStatus(i);
+window.deleteExam = (i) => ExamController.delete(i);
+window.saveQuestion = async () => { const t = Utils.getEl('q-text').value; const ty = Utils.getEl('q-type').value; await DB.addQuestion({ text: t, type: ty }); Utils.getEl('modal-add-question').classList.add('hidden'); View.renderQuestions(); };
+window.openAddQuestionModal = () => Utils.getEl('modal-add-question').classList.remove('hidden');
+window.deleteQuestion = (i) => { if(confirm('Hapus soal ini?')) { STATE.cache.questions.splice(i,1); View.renderQuestions(); }};
+window.closeSuccessModal = () => View.modals.closeSuccess();
+window.closeErrorModal = () => Utils.getEl('modal-error').classList.add('hidden');
+
+// Printing Card Logic
+window.handlePrint = () => {
+    const content = Utils.getEl('card-preview-area').innerHTML;
+    const win = window.open('', '', 'height=700,width=700');
+    win.document.write(`<html><head><title>Print</title><style>body {font-family:sans-serif;} .exam-card {border:1px solid #000; padding:10px; margin:10px; display:inline-block; width:300px;}</style></head><body>${content}</body></html>`);
+    win.document.close();
+    win.print();
+};
+
+window.renderCardPreview = () => {
+    Utils.getEl('card-preview-area').innerHTML = STATE.cache.students.map(s => `
+        <div class="exam-card">
+            <div style="font-weight:bold; border-bottom:1px solid #000; margin-bottom:5px;">SMA NEGERI CONTOH</div>
+            <div><strong>Nama:</strong> ${Utils.escapeHTML(s.nama)}</div>
+            <div><strong>ID:</strong> ${Utils.escapeHTML(s.id_peserta)}</div>
+            <div><strong>Pass:</strong> ${Utils.escapeHTML(s.pass)}</div>
+        </div>
+    `).join('');
+};
+
+document.addEventListener("DOMContentLoaded", () => App.init());
+
