@@ -1,0 +1,480 @@
+body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #F1F5F9; }
+ 
+ /* Utils */
+ .glass-login { background: rgba(255, 255, 255, 0.95); border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+ .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+ .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+ .custom-scrollbar::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 10px; }
+ .hidden-view { display: none !important; }
+ .loading-dots:after { content: ' .'; animation: dots 1s steps(5, end) infinite; }
+ @keyframes dots { 0%, 20% { color: rgba(0,0,0,0); } 40% { color: white; } 80%, 100% { text-shadow: .25em 0 0 white, .5em 0 0 white; } }
+ 
+ /* Sidebar & Nav Transition Updates */
+ .nav-item {
+     position: relative;
+     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+     border-right: 3px solid transparent;
+ }
+ .nav-item:hover { background-color: #eff6ff; color: #2563eb; }
+ .active-nav { background-color: #eff6ff; color: #2563eb; border-right-color: #2563eb; font-weight: 700; }
+ .active-nav svg { transform: scale(1.1); filter: drop-shadow(0 2px 3px rgba(37, 99, 235, 0.2)); transition: transform 0.3s ease; }
+ 
+ /* Settings Sidebar Active State */
+ .settings-nav-item.active {
+     background-color: #eff6ff;
+     color: #2563eb;
+     border-left: 3px solid #2563eb;
+     font-weight: 600;
+ }
+
+ /* Modern Icons Styling */
+ .modern-icon-btn {
+     background: white;
+     border: 1px solid #e2e8f0;
+     border-radius: 12px;
+     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+     transition: all 0.2s;
+     display: flex;
+     align-items: center;
+     justify-content: center;
+     width: 40px;
+     height: 40px;
+     cursor: pointer;
+ }
+ .modern-icon-btn:hover {
+     transform: translateY(-2px);
+     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+     border-color: #3b82f6;
+ }
+ .modern-icon-btn i { width: 20px; height: 20px; }
+ .icon-blue { color: #2563eb; background: linear-gradient(135deg, #eff6ff, #ffffff); }
+ .icon-green { color: #10b981; background: linear-gradient(135deg, #ecfdf5, #ffffff); }
+ .icon-purple { color: #8b5cf6; background: linear-gradient(135deg, #f5f3ff, #ffffff); }
+ .icon-orange { color: #f59e0b; background: linear-gradient(135deg, #fffbeb, #ffffff); }
+ .icon-red { color: #ef4444; background: linear-gradient(135deg, #fef2f2, #ffffff); }
+
+ /* Dropdown Animation */
+ .dropdown-menu { transform-origin: top right; transition: all 0.2s ease-in-out; }
+ .dropdown-menu.hidden { transform: scale(0.95); opacity: 0; pointer-events: none; }
+ .dropdown-menu.show { transform: scale(1); opacity: 1; pointer-events: auto; }
+ 
+ /* Table Action Dropdown (FIXED POSITION) */
+ .action-dropdown {
+     display: none;
+     position: absolute;
+     left: 0; /* FIX: Align left to open towards the right (center screen) */
+     top: 100%;
+     z-index: 100; /* FIX: Increased z-index */
+     background: white;
+     border: 1px solid #e2e8f0;
+     border-radius: 0.5rem;
+     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+     width: 180px;
+     margin-top: 4px;
+ }
+ .action-dropdown.show { display: block; }
+ 
+ /* Bulk Action Dropdown (Upwards) */
+ .bulk-dropdown {
+     display: none;
+     position: absolute;
+     left: 0; 
+     bottom: 100%;
+     z-index: 50;
+     background: white;
+     border: 1px solid #e2e8f0;
+     border-radius: 0.5rem;
+     box-shadow: 0 -10px 15px -3px rgba(0, 0, 0, 0.1);
+     width: 200px;
+     margin-bottom: 8px;
+     transform-origin: bottom left;
+     transition: all 0.2s;
+ }
+ .bulk-dropdown.show { display: block; }
+
+ /* Tabs in Bank Soal */
+ .bank-tab-btn { border-bottom: 2px solid transparent; color: #64748b; }
+ .bank-tab-btn.active { border-bottom-color: #2563eb; color: #2563eb; font-weight: 700; }
+
+ /* Progress Circle for Token */
+ .progress-ring__circle {
+     transition: stroke-dashoffset 0.35s;
+     transform: rotate(-90deg);
+     transform-origin: 50% 50%;
+ } 
+/* --- STYLE KARTU PRESISI (V6.0 - ANTI POTONG) --- */
+.exam-card {
+     width: 6cm;
+     height: 4cm; /* Tinggi Fix 4cm */
+     border: 1px solid #000;
+     background: white;
+     font-family: 'Times New Roman', serif;
+     box-sizing: border-box;
+     position: relative;
+     overflow: hidden;
+     display: flex;
+     flex-direction: column;
+ }
+
+ /* 1. Header Lebih Tipis */
+ .exam-card-header { 
+     display: flex; 
+     border-bottom: 2px double #000; 
+     padding: 1px 0 0,5px 0; /* Padding sangat tipis */
+     margin: 0 3px 1px 3px; 
+     align-items: center; 
+     height: auto; 
+     min-height: 32px;
+     flex-shrink: 0;
+ }
+ .exam-card-logo { width: 40px; height: 35px; object-fit: contain; margin-right: 4px; }
+ .exam-card-header-text { flex: 1; text-align: center; line-height: 0.9; }
+ .exam-card-h1 { font-size: 6pt; font-weight: bold; text-transform: uppercase; }
+ .exam-card-h2 { font-size: 7pt; font-weight: bold; text-transform: uppercase; margin: 0; }
+ .exam-card-h3 { font-size: 5pt; }
+
+ /* Body (Isi Kartu) */
+ .exam-card-body { 
+     display: flex; 
+     gap: 4px; 
+     padding: 2px 4px; 
+     flex: 1; 
+     position: relative; /* Penting untuk TTD absolute */
+ }
+
+ /* 2. Foto Disesuaikan agar tidak terlalu tinggi */
+ .exam-card-photo-box { 
+     width: 1.8cm;  
+     height: 2.2cm; /* Tinggi dikurangi dari 2.5cm ke 2.2cm */
+     background: #f8fafc; 
+     border: 1px solid #cbd5e1; 
+     display: flex; align-items: center; justify-content: center; 
+     font-size: 6px; color: #94a3b8; 
+     flex-shrink: 0; 
+     margin-top: 2px;
+ }
+ .exam-card-photo-img { width: 100%; height: 100%; object-fit: cover; }
+
+ /* Kolom Teks */
+ .exam-card-info { 
+     flex: 1; 
+     display: flex; 
+     flex-direction: column; 
+ }
+
+ .exam-card-title { 
+     font-weight: bold; font-size: 8pt; 
+     text-align: center; text-decoration: underline; 
+     text-underline-offset: 1.5px;
+     margin-bottom: 1,5px; line-height: 1;
+ }
+ .exam-card-subtitle { 
+     font-weight: bold; font-size: 6pt; 
+     text-align: center; margin-bottom: 2px; line-height: 1;
+ }
+
+ /* 3. Baris Data Sangat Rapat */
+ .exam-card-row { 
+     display: flex; 
+     font-size: 6.5pt; /* Font diperkecil sedikit */
+     line-height: 1.1; /* Jarak antar baris dirapatkan */
+     margin-bottom: 0;
+ }
+ .exam-card-label { width: 35px; font-weight: bold; }
+ .exam-card-val { flex: 1; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+ /* 4. Area Tanda Tangan (Absolute Position) */
+ /* Ini kunci agar tidak terpotong: Kita paksa dia nempel di pojok kanan bawah */
+ .exam-card-signature-area {
+     position: absolute;
+     bottom: 2px;
+     right: 4px;
+     text-align: center;
+     width: auto;
+     z-index: 10;
+     background-color: rgba(255,255,255,0.8); /* Background transparan jika menumpuk dikit */
+ }
+ 
+ .exam-card-date { font-size: 5pt; color: #000; line-height: 1; margin-bottom: 1px; }
+ 
+ .exam-card-sign-img { 
+     height: 14px; /* Tinggi TTD diperkecil agar muat */
+     width: auto; 
+     object-fit: contain; 
+     margin: 0 auto; 
+     display: block; 
+ }
+ 
+ .exam-card-teacher-name { font-size: 6pt; font-weight: bold; text-decoration: underline; line-height: 1; }
+ .exam-card-teacher-nip { font-size: 5pt; line-height: 1; }
+
+ /* Layout Grid untuk Tampilan Layar (Preview) */
+ #card-preview-area {
+     display: grid;
+     grid-template-columns: repeat(3, 6cm); /* Samakan dengan print */
+     justify-content: center;
+     gap: 2mm; /* Samakan dengan print */
+     row-gap: 2mm;
+     padding-top: 2mm;
+ }
+
+ /* Style Kartu di Layar */
+ .exam-card {
+     width: 6cm;
+     height: 4cm;
+     border: 1px solid #000;
+     box-sizing: border-box;
+     background: white;
+     /* Pattern halus untuk preview */
+     background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+     background-size: 10px 10px;
+ }
+
+ /* --- CSS CETAK RESPONSIF ORIENTASI (V4.0 Final) --- */
+ @media print {
+     /* 1. Reset Halaman Umum */
+     @page {
+         size: auto; /* Biarkan user memilih Portrait/Landscape di dialog print */
+         margin: 5mm !important; /* Margin aman printer */
+     }
+
+     html, body {
+         background-color: white !important;
+         margin: 0 !important;
+         padding: 0 !important;
+         width: 100%;
+         height: 100%;
+         -webkit-print-color-adjust: exact !important;
+         print-color-adjust: exact !important;
+     }
+
+     /* 2. Sembunyikan UI Website */
+     body > *:not(#print-result) {
+         display: none !important;
+     }
+
+     /* 3. WADAH CETAK (DEFAULT / PORTRAIT) */
+     #print-result {
+         display: grid !important;
+         visibility: visible !important;
+         position: absolute !important;
+         top: 0 !important;
+         left: 0 !important;
+         
+         /* DEFAULT: 3 Kolom untuk Portrait (Kertas Tegak) */
+         grid-template-columns: repeat(3, 6cm) !important;
+         
+         /* Jarak Antar Kartu */
+         column-gap: 3mm !important;
+         row-gap: 3mm !important;
+         
+         /* Rapat Kiri Atas */
+         justify-content: start !important;
+         align-content: start !important;
+         padding-top: 5mm !important;
+         padding-left: 15mm !important;
+         
+         width: 100% !important;
+         height: auto !important;
+         background: transparent !important;
+     }
+
+     #print-result * {
+         visibility: visible !important;
+     }
+
+     /* 4. STYLE KARTU FISIK */
+     .exam-card {
+         width: 6cm !important;
+         height: 4cm !important;
+         border: 1px solid #000 !important;
+         background: white !important;
+         box-sizing: border-box !important;
+         break-inside: avoid !important;
+         page-break-inside: avoid !important;
+         margin: 0 !important;
+         color: #000 !important;
+     }
+
+     .exam-card * {
+         font-family: 'Times New Roman', serif !important;
+         line-height: 1.1 !important;
+     }
+     
+     .exam-card-h1 { font-size: 7pt !important; }
+     .exam-card-h2 { font-size: 8pt !important; }
+     .exam-card-h3 { font-size: 6pt !important; }
+     .exam-card-title { font-size: 9pt !important; margin-top: 2px !important; }
+     .exam-card-row { font-size: 7pt !important; }
+     .exam-card-photo-box { background-color: #f0f0f0 !important; border: 1px solid #ccc !important; }
+ }
+
+ /* --- LOGIKA KHUSUS LANDSCAPE (MENDATAR) --- */
+ /* Kode ini akan aktif HANYA jika user memilih 'Mendatar/Landscape' di menu cetak */
+ @media print and (orientation: landscape) {
+     #print-result {
+         /* UBAH MENJADI 4 KOLOM */
+         grid-template-columns: repeat(4, 6cm) !important;
+         
+         /* Opsional: Sesuaikan margin kiri jika ingin lebih tengah di landscape */
+         /* padding-left: 30mm !important; */
+     }
+ }
+
+ /* --- CSS ANIMASI DINAMIS (BARU) --- */
+ .ticker-container {
+     width: 100%;
+     overflow: hidden;
+     position: relative;
+     display: flex;
+     align-items: center;
+     height: 30px; 
+ }
+ 
+ .ticker-text {
+     white-space: nowrap;
+     font-weight: 600;
+     font-size: 18px;
+     color: white;
+     
+     /* --- OPTIMASI SMOOTH RENDERING --- */
+     will-change: transform;
+     /* Menghaluskan rendering font saat bergerak */
+     -webkit-font-smoothing: antialiased;
+     -moz-osx-font-smoothing: grayscale;
+     text-rendering: optimizeLegibility;
+
+ }
+
+ /* Efek 1: Jalan dari Kanan ke Kiri (Scroll) */
+ .anim-scroll {
+     display: inline-block;
+     padding-left: 100%; /* Trik: Membuat teks mulai dari kanan container */
+     animation: scroll-left 20s linear 1;
+     transform: translateZ(0);
+     backface-visibility: hidden;
+     -webkit-font-smoothing: antialiased;
+ }
+
+ @keyframes scroll-left {
+     0% { transform: translate3d(0, 0, 0); }
+     100% { transform: translate3d(-100%, 0, 0); } /* Geser sejauh 100% lebarnya sendiri ke kiri */
+ }
+
+ /* --- UPDATE: Efek Muncul + Kilatan + Denyutan --- */
+ /* --- PERBAIKAN: Efek Muncul + Kilatan + Denyutan (Agar Pas di Tengah) --- */
+ .anim-center-expand {
+     position: relative;
+     font-weight: 800;
+     
+     /* PERUBAHAN PENTING DI SINI: */
+     /* Hapus width: 100% agar tidak memenuhi container */
+     width: auto; 
+     text-align: center;
+     margin: 0 auto;
+     
+     /* Setup Warna & Kilatan */
+     background: linear-gradient(
+         to right, 
+         #cbd5e1 20%, 
+         #ffffff 50%, 
+         #cbd5e1 80%
+     );
+     background-size: 200% auto;
+     
+     color: #fff;
+     background-clip: text;
+     -webkit-background-clip: text;
+     -webkit-text-fill-color: transparent;
+
+     /* Menjalankan 3 Animasi Sekaligus: */
+     animation: 
+         center-reveal 1.5s cubic-bezier(0.22, 1, 0.36, 1) forwards, /* 1. Muncul */
+         text-shine 3s linear infinite,  /* 2. Kilatan cahaya */
+         text-pulse 2s ease-in-out infinite 1.5s; /* 3. Denyutan (Delay 1.5 detik) */
+ }
+
+     /* --- UPDATE TERBARU: Animasi Denyutan + Merah Menyala --- */
+ @keyframes text-pulse {
+     0%, 100% {
+         transform: scale(1); /* Ukuran Normal */
+         /* Kembalikan ke keadaan transparan agar kilatan perak terlihat lagi */
+         -webkit-text-fill-color: transparent; 
+         text-shadow: none; /* Hapus efek cahaya */
+     }
+     50% {
+         transform: scale(1.05); /* Membesar */
+         
+         /* --- EFEK MERAH MENYALA --- */
+         color: #ff0000; /* Warna dasar merah terang */
+         /* PENTING: Timpa transparansi agar menjadi solid merah */
+         -webkit-text-fill-color: #ff0000; 
+         
+         /* Membuat efek pendaran cahaya (Glow) berlapis */
+         text-shadow: 
+             0 0 10px #ff0000,  /* Cahaya dekat */
+             0 0 20px #ff4d4d,  /* Cahaya tengah (agak oranye/pink dikit biar hidup) */
+             0 0 30px #ff0000; /* Cahaya luar */
+     }
+
+ }
+ /* --- STYLE TABEL RESPONSIF & STABIL --- */
+ 
+ /* 1. Pembungkus Tabel (Agar bisa scroll di HP) */
+ .table-responsive-wrapper {
+     overflow-x: auto; /* Scroll samping otomatis jika layar sempit */
+     -webkit-overflow-scrolling: touch; /* Scroll mulus di iPhone/Android */
+     border-radius: 0.75rem; /* rounded-xl */
+     border: 1px solid #e2e8f0;
+ }
+ 
+ /* 2. Header Tabel Tetap (Sticky Header) */
+ /* Agar saat scroll ke bawah, judul kolom tidak hilang */
+ .modern-table thead th {
+     position: sticky;
+     top: 0;
+     z-index: 20; /* Di atas isi tabel */
+     background-color: #f8fafc; /* bg-slate-50 */
+     white-space: nowrap; /* Judul tidak boleh turun baris */
+ }
+ 
+ /* 3. Isi Tabel (Baris) */
+ .modern-table tbody td {
+     white-space: nowrap; /* Data tidak boleh turun baris agar rapi */
+     vertical-align: middle;
+ }
+ 
+ /* 4. Scrollbar Kustom (Lebih Tipis & Cantik) */
+ .table-responsive-wrapper::-webkit-scrollbar {
+     height: 8px; /* Tinggi scrollbar horizontal */
+     width: 8px;
+ }
+ .table-responsive-wrapper::-webkit-scrollbar-track {
+     background: #f1f5f9;
+     border-radius: 4px;
+ }
+ .table-responsive-wrapper::-webkit-scrollbar-thumb {
+     background: #cbd5e1; /* Warna abu-abu soft */
+     border-radius: 4px;
+ }
+ .table-responsive-wrapper::-webkit-scrollbar-thumb:hover {
+     background: #94a3b8; /* Lebih gelap saat disentuh */
+ }
+
+ /* Tambahkan di style.css atau di dalam tag <style> head */
+ .animate-bounce-short {
+     animation: bounce-short 0.5s infinite alternate;
+ }
+ @keyframes bounce-short {
+     from { transform: translateY(0); }
+     to { transform: translateY(-5px); }
+ }
+ @keyframes shine {
+     100% { left: 125%; }
+ }
+ 
+ .group-hover\:animate-shine:hover {
+     animation: shine 0.75s;
+ }
+
+
