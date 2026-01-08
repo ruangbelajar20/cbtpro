@@ -18,12 +18,10 @@
 <body class="text-slate-600 h-screen overflow-hidden flex flex-col bg-slate-50" onclick="closeDropdowns(event)">
 
     <div id="view-login" class="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 bg-slate-900 overflow-hidden">
-       <div class="absolute bottom-0 left-0 w-full z-40 bg-slate-900/90 backdrop-blur-sm border-t border-white/10 py-2 flex justify-center items-center">
-            
-            <div class="ticker-container w-full text-center flex justify-center"> 
+        <div class="absolute bottom-0 left-0 w-full z-40 bg-slate-900/90 backdrop-blur-sm border-t border-white/10 py-2">
+            <div class="ticker-container">
                 <div id="dynamic-ticker" class="ticker-text"></div>
             </div>
-        
         </div>
         <div class="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 -z-20"></div>
         <div class="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600/30 rounded-full blur-[100px] animate-pulse"></div>
@@ -179,10 +177,9 @@
                                     <h3 class="font-bold text-base text-slate-800 tracking-tight">Trafik Monitor</h3>
                                     <p class="text-xs text-slate-400 font-medium">Koneksi real-time</p>
                                 </div>
-                               <button onclick="updateDashboardStats()" id="btn-refresh-dash" class="text-[10px] border border-slate-200 px-3 py-1 rounded-md bg-white hover:bg-slate-50 font-bold text-slate-500 transition hover:text-blue-600 flex items-center gap-1 shadow-sm active:scale-95">
-                                    <span id="text-refresh">Refresh</span> 
-                                    <i data-feather="rotate-ccw" class="w-2.5 h-2.5 transition-transform" id="icon-refresh"></i>
-                               </button>
+                                <button onclick= "updateDashboardStats()"class="text-[10px] border border-slate-200 px-3 py-1 rounded-md bg-white hover:bg-slate-50 font-bold text-slate-500 transition hover:text-blue-600 flex items-center gap-1 shadow-sm">
+                                    Refresh <i data-feather="rotate-ccw" class="w-2.5 h-2.5"></i>
+                                </button>
                             </div>
                             <div class="flex gap-8 items-end relative z-10">
                                 <div>
@@ -228,32 +225,20 @@
                     </div>
                     
                     <div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-                        <div onclick="View.nav('connections')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 group flex flex-col justify-between h-full card stat-1 relative overflow-hidden">
-    
-                            <div class="absolute right-2 top-2 opacity-50 group-hover:opacity-100 transition-opacity">
-                                <i data-feather="chevron-right" class="w-4 h-4 text-blue-400"></i>
-                            </div>
-                        
-                            <div>
-                                <div class="flex justify-between items-start mb-2">
-                                    <p class="text-2xl md:text-3xl font-black text-slate-800" id="stat-active-devices">0</p>
-                                    <div class="p-2 bg-blue-50 rounded-lg text-blue-500"><i data-feather="wifi" class="w-5 h-5"></i></div>
-                                </div>
-                                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">Total Perangkat</p>
-                            </div>
-                            
-                            <div class="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
-                                <span class="relative flex h-2 w-2">
-                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                    <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                </span>
-                                Realtime History
-                            </div>
-                        </div>
-                                                
                         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 group">
                             <div class="flex justify-between items-start mb-1">
-                                <p class="text-3xl font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors" id="stat-students">0</p>
+                                <p class="text-xl md:text-2xl lg:text-3xl font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors" id="stat-students">0</p>
+                                <div class="p-1.5 bg-blue-50 rounded-md text-blue-500"><i data-feather="wifi" class="w-4 h-4"></i></div>
+                            </div>
+                            <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Koneksi</p>
+                            <div class="mt-2 pt-2 border-t border-slate-50 flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 1 aktif
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all duration-300 group">
+                            <div class="flex justify-between items-start mb-1">
+                                <p class="text-3xl font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors" id="stat-online">0</p>
                                 <div class="p-1.5 bg-indigo-50 rounded-md text-indigo-500"><i data-feather="users" class="w-4 h-4"></i></div>
                             </div>
                             <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Peserta</p>
@@ -267,10 +252,9 @@
                                 <p class="text-3xl font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors" id="stat-proctor-total">...</p>
                                 <div class="p-1.5 bg-purple-50 rounded-md text-purple-500"><i data-feather="eye" class="w-4 h-4"></i></div>
                             </div>
-                            <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Total Pengawas</p>
+                            <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Pengawas</p>
                             <div class="mt-2 pt-2 border-t border-slate-50 flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 
-                                <span id="stat-proctor-online">0</span> online
+                                <span id="stat-proctor-online" w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 0 online
                             </div>
                         </div>
                         
@@ -279,10 +263,9 @@
                                 <p class="text-3xl font-black text-slate-800 tracking-tight group-hover:text-blue-600 transition-colors" id="stat-admin-total">...</p>
                                 <div class="p-1.5 bg-orange-50 rounded-md text-orange-500"><i data-feather="shield" class="w-4 h-4"></i></div>
                             </div>
-                            <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Total Admin</p>
+                            <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Admin</p>
                             <div class="mt-2 pt-2 border-t border-slate-50 flex items-center gap-1.5 text-[10px] font-bold text-emerald-600">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 
-                                <span id="stat-admin-online">0</span> online
+                                <span id="stat-admin-online" w-1.5 h-1.5 rounded-full bg-emerald-500">0</span> online
                             </div>
                         </div>
                     </div>
@@ -468,13 +451,13 @@
                                 <label class="text-xs font-bold text-slate-500">Kelas</label>
                                 <select id="filter-class" class="bg-slate-50 border border-slate-200 text-xs rounded-md px-3 py-1.5 focus:outline-none focus:border-blue-500" onchange="View.renderStudents(false)">
                                     <option value="Semua">Semua Kelas</option>
-                                </select>
+                                    </select>
                             </div>
                             <div class="flex items-center gap-2">
                                 <label class="text-xs font-bold text-slate-500">Ruangan</label>
-                                 <select id="filter-room" class="bg-slate-50 border border-slate-200 text-xs rounded-md px-3 py-1.5 focus:outline-none focus:border-blue-500" onchange="View.renderStudents(false)">
+                                <select id="filter-room" class="bg-slate-50 border border-slate-200 text-xs rounded-md px-3 py-1.5 focus:outline-none focus:border-blue-500" onchange="View.renderStudents(false)">
                                     <option value="Semua">Semua Ruangan</option>
-                                 </select>
+                                    </select>
                             </div>
                             <div class="ml-auto flex items-center gap-2">
                                 <label class="text-xs text-slate-400">Search:</label>
@@ -487,8 +470,7 @@
                                 <thead class="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 sticky top-0 z-10">
                                     <tr>
                                         <th class="w-10 text-center py-3">
-                                            <input type="checkbox" id="check-all-students" class="rounded border-slate-300 cursor-pointer w-3.5 h-3.5" 
-                                                   onchange="View.toggleSelectAll(this, STATE.cache.students, 'id_peserta')">
+                                            <input type="checkbox" id="check-all-students" class="rounded border-slate-300 cursor-pointer w-3.5 h-3.5" onclick="toggleAllStudents(this)">
                                         </th>
                                         <th class="py-3 px-2">Aksi</th>
                                         <th class="py-3 px-2">#</th>
@@ -512,32 +494,17 @@
                              <button onclick="toggleBulkActions(event)" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition flex items-center gap-2">
                                 <span id="selection-count">(0) Terseleksi</span> <i data-feather="chevron-right" class="w-3 h-3"></i>
                              </button>
-                             <div id="dropdown-bulk-actions" class="bulk-dropdown text-left hidden absolute bg-white shadow-lg rounded-lg z-50 border border-slate-200 bottom-full mb-2 left-0 w-48">
-    
-                                <button onclick="document.getElementById('modal-register-exam').classList.remove('hidden'); View.populateBulkDropdowns();" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600 font-bold border-b">
-                                    Daftarkan Ujian
-                                </button>
-                            
-                                <button onclick="document.getElementById('modal-move-class').classList.remove('hidden'); View.populateBulkDropdowns();" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b">
-                                    Pindah Kelas
-                                </button>
-                            
-                                <button onclick="document.getElementById('modal-move-room').classList.remove('hidden'); View.populateBulkDropdowns();" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b">
-                                    Pindah Ruangan
-                                </button>
-                            
-                                <button onclick="document.getElementById('modal-move-session').classList.remove('hidden')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b">
-                                    Pindah Sesi
-                                </button>
-                                
-                                <button onclick="BulkController.action('random_pass')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b text-orange-600">
-                                    Random Password
-                                </button>
-                                
-                                <button onclick="BulkController.action('delete')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">
-                                    Hapus Data
-                                </button>
-                            </div>
+                             <div id="dropdown-bulk-actions" class="bulk-dropdown text-left">
+                                <button onclick="openBulkModal('modal-register-exam')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600 font-bold border-b">Daftarkan Ujian</button>
+                                <button onclick="openBulkModal('modal-move-class')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b">Pindah Kelas</button>
+                                <button onclick="openBulkModal('modal-move-room')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b">Pindah Ruangan</button>
+                                <button onclick="document.getElementById('modal-move-session').classList.remove('hidden')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50">Pindah Sesi</button>
+                                <button onclick="BulkController.action('random_pass')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 border-b text-orange-600">Random Password</button>
+                                <button onclick="document.getElementById('modal-confirm-delete').classList.remove('hidden')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 mt-1">Hapus Data</button>
+                             </div>
+                        </div>
+                    </div>
+                </div>
 
                 <div id="panel-add-student" class="admin-panel hidden-view fade-in h-full flex flex-col">
                     <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-full overflow-y-auto custom-scrollbar">
@@ -599,15 +566,16 @@
                                         <div>
                                             <label class="block text-xs font-bold text-red-500 mb-1">Kelas/Jurusan*</label>
                                             <select id="input-kelas" class="w-full border border-slate-300 rounded-md p-2.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none bg-white">
-                                                <option value="">Memuat data...</option>
-                                            </select>
+                                                <option value="">-- Pilih Kelas --</option>
+                                                </select>
                                         </div>
-                                        
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-4">
                                         <div>
                                             <label class="block text-xs font-bold text-red-500 mb-1">Ruangan*</label>
                                             <select id="input-ruangan" class="w-full border border-slate-300 rounded-md p-2.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none bg-white">
-                                                <option value="">Memuat data...</option>
-                                            </select>
+                                                <option value="">-- Pilih Ruangan --</option>
+                                                </select>
                                         </div>
                                         <div>
                                             <label class="block text-xs font-bold text-red-500 mb-1">Sesi Ujian*</label>
@@ -945,11 +913,11 @@
                                         </div>
                             
                                         <div class="pt-4 flex gap-3">
-                                            <button onclick="SettingsController.generateToken()" class="flex-1 py-3 bg-white border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-2">
+                                            <button onclick="regenerateToken()" class="flex-1 py-3 bg-white border border-slate-300 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition flex items-center justify-center gap-2">
                                                 <i data-feather="refresh-cw" class="w-4 h-4"></i> Generate Baru
                                             </button>
                                             
-                                            <button onclick="SettingsController.saveTokenSettings()" class="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                                            <button onclick="saveTokenSettings(this)" class="flex-1 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
                                                 <i data-feather="save" class="w-4 h-4"></i> Simpan
                                             </button>
                                         </div>
@@ -968,37 +936,6 @@
                                 <p class="text-sm text-slate-500 mt-1">Versi 2.6.0 (Stable Build)</p>
                             </div>
 
-                        </div>
-                    </div>
-                </div>
-                <div id="panel-connections" class="admin-panel hidden-view fade-in h-full flex flex-col">
-                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm h-full flex flex-col">
-                        <div class="flex justify-between items-center mb-6">
-                            <div>
-                                <h3 class="font-bold text-lg text-slate-800">Riwayat Koneksi</h3>
-                                <p class="text-xs text-slate-400">Daftar perangkat yang pernah mengakses portal ujian.</p>
-                            </div>
-                            <button onclick="View.nav('dashboard')" class="text-slate-500 hover:text-blue-600 text-xs font-bold flex items-center gap-1">
-                                <i data-feather="arrow-left" class="w-4 h-4"></i> Kembali
-                            </button>
-                        </div>
-                
-                        <div class="flex-grow table-responsive-wrapper bg-white relative">
-                            <table class="w-full text-left modern-table">
-                                <thead class="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200 sticky top-0 z-10">
-                                    <tr>
-                                        <th class="py-3 px-4 w-12">#</th>
-                                        <th class="py-3 px-4">Device ID</th>
-                                        <th class="py-3 px-4">Perangkat / Browser</th>
-                                        <th class="py-3 px-4">IP Address</th>
-                                        <th class="py-3 px-4">Terakhir Aktif</th>
-                                        <th class="py-3 px-4 text-center">Total Kunjungan</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="table-connections-body" class="bg-white text-xs text-slate-600 divide-y divide-slate-100">
-                                    <tr><td colspan="6" class="text-center py-4">Memuat data...</td></tr>
-                                </tbody>
-                            </table>
                         </div>
                     </div>
                 </div>
@@ -1766,19 +1703,18 @@
             </div>
         </div>
     </div>
+
     <div id="modal-register-exam" class="fixed inset-0 bg-black/50 z-[200] hidden flex items-center justify-center backdrop-blur-sm transition-opacity">
         <div class="bg-white rounded-lg shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="p-5">
                 <h3 class="font-bold text-lg text-slate-800 mb-2">Daftarkan Peserta</h3>
                 <p class="text-xs text-slate-500 mb-4">Pilih ujian yang tersedia untuk didaftarkan.</p>
-                
-                <select id="bulk-input-exam" class="w-full border border-slate-300 rounded-md p-2 text-sm mb-4 focus:outline-none focus:border-blue-500">
-                    <option value="">Memuat data...</option>
-                </select>
-
+               <select id="bulk-input-exam" class="w-full border border-slate-300 rounded-md p-2 text-sm mb-4 focus:outline-none focus:border-blue-500">
+                   <option value="">Memuat data...</option>
+               </select>
                 <div class="flex gap-2 justify-end">
                     <button onclick="document.getElementById('modal-register-exam').classList.add('hidden')" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm font-bold">Batal</button>
-                    <button onclick="BulkController.execute('register_exam')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold hover:bg-blue-700">Simpan</button>
+                    <button onclick="BulkController.execute('register_exam')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold">Simpan</button>
                 </div>
             </div>
         </div>
@@ -1789,14 +1725,12 @@
             <div class="p-5">
                 <h3 class="font-bold text-lg text-slate-800 mb-2">Pindah Kelas</h3>
                 <p class="text-xs text-slate-500 mb-4">Pilih kelas tujuan untuk peserta ini.</p>
-                
-                <select id="bulk-input-class" class="w-full border border-slate-300 rounded-md p-2 text-sm mb-4 focus:outline-none focus:border-blue-500">
-                    <option value="">Memuat data...</option>
-                </select>
-
+              <select id="bulk-input-class" class="w-full border border-slate-300 rounded-md p-2 text-sm mb-4 focus:outline-none focus:border-blue-500">
+                  <option value="">Memuat data...</option>
+              </select>
                 <div class="flex gap-2 justify-end">
                     <button onclick="document.getElementById('modal-move-class').classList.add('hidden')" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm font-bold">Batal</button>
-                    <button onclick="BulkController.execute('move_class')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold hover:bg-blue-700">Simpan</button>
+                    <button onclick="BulkController.execute('move_class')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold">Simpan</button>
                 </div>
             </div>
         </div>
@@ -1807,14 +1741,12 @@
             <div class="p-5">
                 <h3 class="font-bold text-lg text-slate-800 mb-2">Pindah Ruangan</h3>
                 <p class="text-xs text-slate-500 mb-4">Pilih ruangan tujuan untuk peserta ini.</p>
-                
                 <select id="bulk-input-room" class="w-full border border-slate-300 rounded-md p-2 text-sm mb-4 focus:outline-none focus:border-blue-500">
                     <option value="">Memuat data...</option>
                 </select>
-
                 <div class="flex gap-2 justify-end">
                     <button onclick="document.getElementById('modal-move-room').classList.add('hidden')" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm font-bold">Batal</button>
-                    <button onclick="BulkController.execute('move_room')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold hover:bg-blue-700">Simpan</button>
+                    <button onclick="BulkController.execute('move_room')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold">Simpan</button>
                 </div>
             </div>
         </div>
@@ -1825,12 +1757,10 @@
             <div class="p-5">
                 <h3 class="font-bold text-lg text-slate-800 mb-2">Pindah Sesi</h3>
                 <p class="text-xs text-slate-500 mb-4">Masukkan sesi baru untuk peserta ini.</p>
-                
                 <input type="text" id="bulk-input-session" class="w-full border border-slate-300 rounded-md p-2 text-sm mb-4" placeholder="Contoh: 1, 2, atau 3">
-
                 <div class="flex gap-2 justify-end">
                     <button onclick="document.getElementById('modal-move-session').classList.add('hidden')" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm font-bold">Batal</button>
-                    <button onclick="BulkController.execute('move_session')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold hover:bg-blue-700">Simpan</button>
+                    <button onclick="BulkController.execute('move_session')" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-bold">Simpan</button>
                 </div>
             </div>
         </div>
@@ -1845,7 +1775,7 @@
             <p class="text-sm text-slate-500 mb-6">Tindakan ini tidak dapat dibatalkan. Semua data terkait peserta ini akan hilang permanen.</p>
             <div class="flex gap-2 justify-center">
                 <button onclick="document.getElementById('modal-confirm-delete').classList.add('hidden')" class="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm font-bold">Batal</button>
-                <button onclick="document.getElementById('modal-confirm-delete').classList.add('hidden'); alert('Data dihapus!')" class="px-4 py-2 bg-red-600 text-white rounded-md text-sm font-bold hover:bg-red-700">Ya, Hapus</button>
+                <button onclick="document.getElementById('modal-confirm-delete').classList.add('hidden'); BulkController.action('delete')" class="px-4 py-2 bg-red-600 text-white rounded-md text-sm font-bold hover:bg-red-700">Ya, Hapus</button>
             </div>
         </div>
     </div>
@@ -1925,90 +1855,37 @@
     </div>
 </div>
 <div id="modal-success" class="fixed inset-0 z-[300] hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-    <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity opacity-0 duration-300"></div>
+    <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity opacity-100"></div>
     
     <div class="fixed inset-0 z-10 overflow-y-auto">
         <div class="flex min-h-full items-center justify-center p-4 text-center">
             
-            <div class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:w-full sm:max-w-xs scale-95 opacity-0 p-8 flex flex-col items-center gap-4">
+            <div class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:w-full sm:max-w-sm scale-100 p-6 flex flex-col items-center gap-4">
                 
                 <div class="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mb-2 relative">
                     <div class="absolute inset-0 bg-emerald-100 rounded-full animate-ping opacity-75"></div>
                     <i data-feather="check" class="w-8 h-8 text-emerald-600 relative z-10 stroke-[3px]"></i>
                 </div>
     
-                <div class="text-center space-y-2">
+                <div class="text-center space-y-1">
                     <h3 class="text-xl font-black text-slate-800 tracking-tight">Berhasil!</h3>
                     <p id="msg-success" class="text-sm text-slate-500 font-medium leading-relaxed">
-                        Login berhasil.
+                        Data kelas berhasil disimpan.
                     </p>
-                    <div class="flex justify-center pt-2">
-                        <div class="w-5 h-5 border-2 border-slate-200 border-t-emerald-600 rounded-full animate-spin"></div>
-                    </div>
                 </div>
     
-                </div>
-        </div>
-    </div>
-</div>
-<div id="modal-connection-detail" class="fixed inset-0 z-[60] hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
-    <div class="fixed inset-0 bg-slate-900/50 transition-opacity backdrop-blur-sm"></div>
-    <div class="fixed inset-0 z-10 overflow-y-auto">
-        <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-            <div class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-md">
-                <div class="bg-white px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
-                    <h3 class="text-lg font-semibold leading-6 text-slate-900 mb-4" id="modal-title">Rincian Koneksi</h3>
-                    <div class="space-y-3 text-sm">
-                        <div class="flex justify-between border-b pb-2">
-                            <span class="text-slate-500">Device ID</span>
-                            <span class="font-mono font-bold" id="detail-device-id">-</span>
-                        </div>
-                        <div class="flex justify-between border-b pb-2">
-                            <span class="text-slate-500">Perangkat</span>
-                            <span class="font-bold" id="detail-device-name">-</span>
-                        </div>
-                        <div class="flex justify-between border-b pb-2">
-                            <span class="text-slate-500">IP Address</span>
-                            <span class="font-mono" id="detail-ip">-</span>
-                        </div>
-                        <div class="flex justify-between border-b pb-2">
-                            <span class="text-slate-500">Terakhir Dilihat</span>
-                            <span class="" id="detail-last-seen">-</span>
-                        </div>
-                         <div class="flex justify-between border-b pb-2">
-                            <span class="text-slate-500">Total Kunjungan</span>
-                            <span class="font-bold bg-blue-100 text-blue-800 px-2 rounded" id="detail-visits">-</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-slate-500">Perkiraan Lokasi</span>
-                            <span class="italic text-slate-600">Indonesia (ISP Provider)</span> 
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-slate-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
-                    <button type="button" onclick="document.getElementById('modal-connection-detail').classList.add('hidden')" class="mt-3 inline-flex w-full justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50 sm:mt-0 sm:w-auto">Tutup</button>
+               <button onclick="closeSuccessModal()" class="w-full mt-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-lg transition-all duration-200">
+                   Selesai
+               </button>
+    
                 </div>
             </div>
         </div>
     </div>
-</div>
     <script src="app.js"></script>
 </body>
 
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
