@@ -319,52 +319,43 @@ const View = {
         const activeBtn = Utils.getEl('nav-' + panelId);
         if (activeBtn) activeBtn.classList.add('active-nav');
 
-        // 4. Logika Per Halaman
+        // 4. Tutup Sidebar di Mobile (Jika layar kecil)
+        if (window.innerWidth < 768) {
+            Utils.getEl('sidebar')?.classList.add('-translate-x-full');
+            Utils.getEl('sidebar-overlay')?.classList.add('hidden');
+        }
+
+        // --- LOGIKA PER HALAMAN (HANYA TULIS SATU KALI) ---
+
+        // A. Dashboard
         if (panelId === 'dashboard') this.updateDashboard();
         
+        // B. Data Peserta
         if (panelId === 'students') {
-            this.populateFilters();
+            this.populateFilters(); // Isi filter Kelas/Ruangan di atas tabel
             this.renderStudents(false);
         }
         
+        // C. Kelas & Ruangan
         if (panelId === 'classes') this.renderClasses();
         if (panelId === 'rooms') this.renderRooms();
+        
+        // D. Riwayat Koneksi
         if (panelId === 'connections') this.renderConnections();
 
-        // [PERBAIKAN UTAMA] - Halaman Bank Soal
+        // E. Bank Soal (PENTING: Agar tidak blank)
         if (panelId === 'questions') {
-            // Pastikan fungsi ini ada & benar
-            this.switchBankTab('soal'); 
+            this.switchBankTab('soal'); // Buka tab daftar soal
             this.renderQuestions();
         }
 
-        // [PERBAIKAN UTAMA] - Halaman Pengaturan
+        // F. Pengaturan (PENTING: Agar tidak blank)
         if (panelId === 'settings') {
-            // Load data token
-            this.loadSettingsData(); 
-            // Buka tab default (Profil) agar tidak blank
-            this.switchSettingTab(null, 'profile'); 
-        }
-        
-        if (panelId === 'students') {
-            this.populateFilters(); // Isi filter dropdown di atas tabel
-            this.renderStudents(false);
-        }
-        
-        if (panelId === 'classes') this.renderClasses();
-        if (panelId === 'rooms') this.renderRooms();
-        
-        if (panelId === 'questions') { 
-            this.switchBankTab('soal'); 
-            this.renderQuestions(); 
+            this.loadSettingsData(); // Ambil data token
+            this.switchSettingTab(null, 'profile'); // Buka tab profil
         }
 
-        // Load Settings Data saat menu pengaturan dibuka
-        if (panelId === 'settings') {
-            this.loadSettingsData();
-        }
-        
-        // Reset seleksi setiap pindah menu
+        // 5. Reset Seleksi (Agar tombol 'Terseleksi' kembali ke 0 saat pindah menu)
         this.selectedItems = [];
         this.updateBulkButtonUI();
     },
@@ -1515,6 +1506,9 @@ window.onclick = (e) => {
 };
 // Start App
 document.addEventListener("DOMContentLoaded", () => App.init());
+
+
+
 
 
 
