@@ -294,32 +294,79 @@ const Auth = {
 };
 
 // ============================================================================
-// 5. VIEW CONTROLLER (LOGIKA TAMPILAN)
+// 5. VIEW CONTROLLER (LOGIKA TAMPILAN) - FULL UPDATE
 // ============================================================================
 const View = {
+    // 1. Variabel State Seleksi
+    selectedItems: [],
+
+    // 2. Navigasi Utama
     nav(panelId) {
+        // 1. Sembunyikan semua panel
         document.querySelectorAll('.admin-panel').forEach(p => p.classList.add('hidden-view'));
+        
+        // 2. Tampilkan panel yang dituju
         const target = Utils.getEl('panel-' + panelId) || Utils.getEl(panelId);
-        if (target) target.classList.remove('hidden-view');
+        if (target) {
+            target.classList.remove('hidden-view');
+            // Efek Fade In
+            target.style.opacity = 0;
+            setTimeout(() => target.style.opacity = 1, 50);
+        }
 
-        // [PENTING] Handler untuk Riwayat Koneksi
-        if (panelId === 'connections') this.renderConnections();
-
+        // 3. Update Sidebar Active State
         document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active-nav'));
         const activeBtn = Utils.getEl('nav-' + panelId);
         if (activeBtn) activeBtn.classList.add('active-nav');
 
-        if (window.innerWidth < 768) {
-            Utils.getEl('sidebar')?.classList.add('-translate-x-full');
-            Utils.getEl('sidebar-overlay')?.classList.add('hidden');
-        }
-
-        // Auto Refresh Data
+        // 4. Logika Per Halaman
         if (panelId === 'dashboard') this.updateDashboard();
-        if (panelId === 'students') this.populateFilters(); this.renderStudents(false);
+        
+        if (panelId === 'students') {
+            this.populateFilters();
+            this.renderStudents(false);
+        }
+        
         if (panelId === 'classes') this.renderClasses();
         if (panelId === 'rooms') this.renderRooms();
-        if (panelId === 'questions') { this.switchBankTab('soal'); this.renderQuestions(); }
+        if (panelId === 'connections') this.renderConnections();
+
+        // [PERBAIKAN UTAMA] - Halaman Bank Soal
+        if (panelId === 'questions') {
+            // Pastikan fungsi ini ada & benar
+            this.switchBankTab('soal'); 
+            this.renderQuestions();
+        }
+
+        // [PERBAIKAN UTAMA] - Halaman Pengaturan
+        if (panelId === 'settings') {
+            // Load data token
+            this.loadSettingsData(); 
+            // Buka tab default (Profil) agar tidak blank
+            this.switchSettingTab(null, 'profile'); 
+        }
+        
+        if (panelId === 'students') {
+            this.populateFilters(); // Isi filter dropdown di atas tabel
+            this.renderStudents(false);
+        }
+        
+        if (panelId === 'classes') this.renderClasses();
+        if (panelId === 'rooms') this.renderRooms();
+        
+        if (panelId === 'questions') { 
+            this.switchBankTab('soal'); 
+            this.renderQuestions(); 
+        }
+
+        // Load Settings Data saat menu pengaturan dibuka
+        if (panelId === 'settings') {
+            this.loadSettingsData();
+        }
+        
+        // Reset seleksi setiap pindah menu
+        this.selectedItems = [];
+        this.updateBulkButtonUI();
     },
 
     toggleSidebar() {
@@ -331,6 +378,275 @@ const View = {
         }
     },
 
+    // --- LOGIKA SELEKSI & TOMBOL ---
+    toggleSelect(id, isChecked) {
+        if (isChecked) {
+            this.selectedItems.push(id);
+        } else {
+            this.selectedItems = this.selectedItems.filter(item => item !== id);
+        }
+        this.updateBulkButtonUI(); 
+    },
+
+    toggleSelectAll(source, dataCache, keyName = 'name') {
+        const checkboxes = document.querySelectorAll('.row-checkbox');
+        checkboxes.forEach(cb => cb.checked = source.checked);
+        
+        if (source.checked) {
+            this.selectedItems = dataCache.map(item => item[keyName]); 
+        } else {
+            this.selectedItems = [];
+        }
+        this.updateBulkButtonUI(); 
+    },
+
+    updateBulkButtonUI() {
+        const countSpan = document.getElementById('selection-count');
+        const btnContainer = document.getElementById('dropdown-bulk-actions');
+        
+        if (countSpan) {
+            countSpan.innerText = `(${this.selectedItems.length}) Terseleksi`;
+        }
+        if (this.selectedItems.length === 0 && btnContainer) {
+            btnContainer.classList.add('hidden');
+            btnContainer.classList.remove('block'); 
+        }
+    },
+
+    // --- FUNGSI DATA (POPULATE) ---
+    async populateFilters() {
+        const filterClass = document.getElementById('filter-class');
+        const filterRoom = document.getElementById('filter-room');
+
+        if (filterClass && filterRoom) {
+            const classes = await DB.getClassList();
+            const rooms = await DB.getRoomList();
+
+            filterClass.innerHTML = `<option value="Semua">Semua Kelas</option>` + 
+                classes.map(c => `<option value="${c}">${c}</option>`).join('');
+
+            filterRoom.innerHTML = `<option value="Semua">Semua Ruangan</option>` + 
+                rooms.map(r => `<option value="${r}">${r}</option>`).join('');
+        }
+    },
+
+    async populateStudentForm() {
+        const selKelas = document.getElementById('input-kelas');
+        const selRuang = document.getElementById('input-ruangan');
+        
+        if(selKelas) {
+            selKelas.innerHTML = '<option value="">Memuat data...</option>';
+            const classes = await DB.getClassList();
+            selKelas.innerHTML = classes.length === 0 
+                 ? `<option value="">Belum ada kelas</option>`
+                 : `<option value="">-- Pilih Kelas --</option>` + classes.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+        if(selRuang) {
+            selRuang.innerHTML = '<option value="">Memuat data...</option>';
+            const rooms = await DB.getRoomList();
+             if (rooms.length === 0) {
+                 selRuang.innerHTML = `<option value="">Belum ada ruangan</option>`;
+            } else {
+                selRuang.innerHTML = `<option value="">-- Pilih Ruangan --</option>` + rooms.map(r => `<option value="${r}">${r}</option>`).join('');
+            }
+        }
+    },
+
+    async populateBulkDropdowns() {
+        const selClass = document.getElementById('bulk-input-class');
+        const selRoom = document.getElementById('bulk-input-room');
+        const selExam = document.getElementById('bulk-input-exam'); 
+
+        if (selClass) {
+            selClass.innerHTML = '<option value="">Sedang memuat...</option>';
+            const classes = await DB.getClassList();
+            selClass.innerHTML = classes.length === 0 
+                ? '<option value="">Belum ada data kelas</option>' 
+                : `<option value="">-- Pilih Kelas Tujuan --</option>` + classes.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+        if (selRoom) {
+            selRoom.innerHTML = '<option value="">Sedang memuat...</option>';
+            const rooms = await DB.getRoomList();
+            selRoom.innerHTML = rooms.length === 0 
+                ? '<option value="">Belum ada data ruangan</option>' 
+                : `<option value="">-- Pilih Ruangan Tujuan --</option>` + rooms.map(r => `<option value="${r}">${r}</option>`).join('');
+        }
+        if (selExam) {
+            selExam.innerHTML = '<option value="">Sedang memuat...</option>';
+            const exams = await DB.getExamList(); 
+            selExam.innerHTML = exams.length === 0 
+                ? '<option value="">Tidak ada ujian aktif</option>' 
+                : `<option value="">-- Pilih Ujian --</option>` + exams.map(e => `<option value="${e.id}">${e.nama_ujian}</option>`).join('');
+        }
+    },
+
+    async loadSettingsData() {
+        const data = await DB.getTokenSettings();
+        if(data) {
+            if(Utils.getEl('setting-token-display')) Utils.getEl('setting-token-display').innerText = data.token_code;
+            if(Utils.getEl('token-duration')) Utils.getEl('token-duration').value = data.token_duration;
+            if(Utils.getEl('toggle-auto-token')) Utils.getEl('toggle-auto-token').checked = data.auto_refresh;
+        }
+    },
+
+    // --- RENDER TABEL & LIST ---
+    async renderStudents(useCache = false) {
+        if(!useCache) { this.selectedItems = []; this.updateBulkButtonUI(); }
+
+        const tbody = Utils.getEl('table-students-body');
+        if (!useCache || STATE.cache.students.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8"><span class="animate-spin">⏳</span> Memuat...</td></tr>`;
+            STATE.cache.students = await DB.getStudents();
+        }
+
+        const filterClass = Utils.getEl('filter-class')?.value || 'Semua';
+        const filterRoom = Utils.getEl('filter-room')?.value || 'Semua';
+
+        const html = STATE.cache.students.map((s, i) => {
+            if (filterClass !== 'Semua' && s.kelas !== filterClass) return '';
+            if (filterRoom !== 'Semua' && s.ruangan !== filterRoom) return '';
+
+            const passwordHtml = `
+                <div class="flex items-center justify-center gap-2">
+                    <span id="pass-text-${i}" class="font-mono text-xs tracking-widest">***</span>
+                    <button onclick="View.togglePass(${i}, '${Utils.escapeHTML(s.pass)}')" class="text-slate-400 hover:text-blue-600"><i data-feather="eye" class="w-3.5 h-3.5"></i></button>
+                </div>`;
+
+            return `
+            <tr class="border-b hover:bg-slate-50 transition group-row">
+                <td class="px-2 py-3 text-center">
+                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
+                        value="${Utils.escapeHTML(s.id_peserta)}"
+                        ${View.selectedItems.includes(s.id_peserta) ? 'checked' : ''}
+                        onchange="View.toggleSelect('${Utils.escapeHTML(s.id_peserta)}', this.checked)">
+                </td>
+                <td class="px-2 py-3 text-center relative">
+                    <button onclick="toggleActionDropdown('stu-${i}', event)" class="bg-blue-50 p-1 rounded hover:bg-blue-100 text-blue-600"><i data-feather="more-horizontal" class="w-3.5 h-3.5"></i></button>
+                    <div id="dropdown-stu-${i}" class="action-dropdown text-left z-50">
+                        <button onclick="View.nav('add-student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50">Edit Data</button>
+                        <button onclick="View.modals.confirmDelete('${Utils.escapeHTML(s.id_peserta)}', 'student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
+                    </div>
+                </td>
+                <td class="px-2 py-3 text-center text-[10px]">${i + 1}</td>
+                <td class="px-2 py-3 font-mono text-xs">${Utils.escapeHTML(s.username)}</td>
+                <td class="px-2 py-3 text-center">${passwordHtml}</td>
+                <td class="px-2 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(s.nama)}</td>
+                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.id_peserta)}</td>
+                <td class="px-2 py-3"><span class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.kelas)}</span></td>
+                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.ruangan)}</td>
+                <td class="px-2 py-3 text-center"><span class="bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.sesi)}</span></td>
+                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.sekolah)}</td>
+                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.agama)}</td>
+                <td class="px-2 py-3 text-xs italic">${Utils.escapeHTML(s.catatan)}</td>
+            </tr>`;
+        }).join('');
+        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-4 text-xs">Data kosong.</td></tr>`;
+        if (typeof feather !== 'undefined') feather.replace();
+    },
+
+    async renderClasses() {
+        this.selectedItems = []; 
+        this.updateBulkButtonUI();
+        const tbody = Utils.getEl('table-classes-body');
+        STATE.cache.classes = await DB.getClasses();
+        
+        const html = STATE.cache.classes.map((item, i) => `
+            <tr class="border-b hover:bg-slate-50 transition">
+                <td class="px-4 py-3 text-center">
+                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
+                        onchange="View.toggleSelect('${Utils.escapeHTML(item.name)}', this.checked)">
+                </td>
+                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
+                <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
+                <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
+                <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
+                <td class="px-4 py-3">
+                    <button onclick="View.navToStudentFilter('kelas', '${Utils.escapeHTML(item.name)}')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+                        <i data-feather="users" class="w-3 h-3"></i> (${item.count || 0}) Peserta
+                    </button>
+                </td>
+                <td class="px-4 py-3 text-[10px]">${item.date}</td>
+                <td class="px-4 py-3 text-center relative">
+                    <button onclick="toggleActionDropdown('cls-${i}', event)" class="bg-slate-100 p-1.5 rounded hover:bg-slate-200 text-slate-600">
+                        <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <div id="dropdown-cls-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right">
+                        <button onclick="View.modals.openEditClass('${item.id}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600">Edit</button>
+                        <button onclick="View.modals.confirmDelete('${item.id}', 'class')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
+                    </div>
+                </td>
+            </tr>`).join('');
+        tbody.innerHTML = html;
+        if (typeof feather !== 'undefined') feather.replace();
+    },
+
+    async renderRooms() {
+        this.selectedItems = [];
+        this.updateBulkButtonUI();
+        const tbody = Utils.getEl('table-rooms-body');
+        STATE.cache.rooms = await DB.getRooms();
+        
+        const html = STATE.cache.rooms.map((item, i) => `
+            <tr class="border-b hover:bg-slate-50 transition">
+                <td class="px-4 py-3 text-center">
+                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
+                        onchange="View.toggleSelect('${Utils.escapeHTML(item.name)}', this.checked)">
+                </td>
+                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
+                <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
+                <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
+                <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
+                <td class="px-4 py-3">
+                     <button onclick="View.navToStudentFilter('ruangan', '${Utils.escapeHTML(item.name)}')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+                        <i data-feather="users" class="w-3 h-3"></i> (${item.count || 0}) Peserta
+                    </button>
+                </td>
+                <td class="px-4 py-3 text-[10px]">${item.date}</td>
+                <td class="px-4 py-3 text-center relative">
+                     <button onclick="toggleActionDropdown('room-${i}', event)" class="bg-slate-100 p-1.5 rounded hover:bg-slate-200 text-slate-600">
+                        <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <div id="dropdown-room-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right">
+                        <button onclick="View.modals.openEditRoom('${item.id}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600">Edit</button>
+                        <button onclick="View.modals.confirmDelete('${item.id}', 'room')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
+                    </div>
+                </td>
+            </tr>`).join('');
+        tbody.innerHTML = html;
+        if (typeof feather !== 'undefined') feather.replace();
+    },
+
+    // --- NAVIGASI FILTER & LAINNYA ---
+    navToStudentFilter(type, value) { 
+        this.nav('students');
+        setTimeout(() => {
+            if(type === 'kelas') {
+                const select = Utils.getEl('filter-class');
+                if(select) { select.value = value; select.dispatchEvent(new Event('change')); }
+            } else if (type === 'ruangan') {
+                const select = Utils.getEl('filter-room');
+                if(select) { select.value = value; select.dispatchEvent(new Event('change')); }
+            }
+            this.renderStudents(true); 
+        }, 100); 
+    }, 
+
+    togglePass(index, realPass) {
+        const textEl = Utils.getEl(`pass-text-${index}`);
+        const iconEl = Utils.getEl(`icon-pass-${index}`);
+        
+        if (!textEl) return;
+        if (textEl.innerText === '***') {
+            textEl.innerText = realPass;
+            textEl.classList.add('text-blue-600', 'font-bold');
+            if(iconEl) iconEl.classList.add('text-blue-600'); 
+        } else {
+            textEl.innerText = '***';
+            textEl.classList.remove('text-blue-600', 'font-bold');
+            if(iconEl) iconEl.classList.remove('text-blue-600');
+        }
+    },
+
     async updateDashboard() {
         const btn = Utils.getEl('btn-refresh-dash');
         const icon = Utils.getEl('icon-refresh');
@@ -339,15 +655,6 @@ const View = {
         if (icon) icon.classList.add('animate-spin'); 
         if (text) text.innerText = "Updating...";     
         if (btn) btn.classList.add('bg-slate-100', 'text-blue-600'); 
-
-        const ids = [
-            'stat-students', 'stat-online', 'stat-classes', 'stat-rooms', 
-            'stat-exams', 'stat-exams-active', 'stat-proctor-total', 
-            'stat-proctor-online', 'stat-admin-total', 'stat-admin-online', 
-            'stat-http', 'stat-active-devices'
-        ];
-        
-        ids.forEach(id => { if(Utils.getEl(id)) Utils.getEl(id).innerText = "..."; });
 
         try {
             const [
@@ -381,329 +688,17 @@ const View = {
             for (const [id, val] of Object.entries(map)) {
                 if(Utils.getEl(id)) Utils.getEl(id).innerText = val;
             }
-
-        } catch (e) { 
-            console.error("Gagal update dashboard:", e); 
-        } finally {
+        } catch (e) { console.error("Dashboard error:", e); } 
+        finally {
             if (icon) icon.classList.remove('animate-spin');
             if (text) text.innerText = "Refresh";
             if (btn) btn.classList.remove('bg-slate-100', 'text-blue-600');
         }
     },
-    // Masukkan di dalam const View = { ...
 
-    // Fungsi baru untuk mengisi Filter dari Database
-    async populateFilters() {
-        const filterClass = document.getElementById('filter-class');
-        const filterRoom = document.getElementById('filter-room');
-
-        if (filterClass && filterRoom) {
-            // Ambil data dari DB
-            const classes = await DB.getClassList();
-            const rooms = await DB.getRoomList();
-
-            // Isi Filter Kelas (Jaga opsi 'Semua' tetap ada)
-            filterClass.innerHTML = `<option value="Semua">Semua Kelas</option>` + 
-                classes.map(c => `<option value="${c}">${c}</option>`).join('');
-
-            // Isi Filter Ruangan
-            filterRoom.innerHTML = `<option value="Semua">Semua Ruangan</option>` + 
-                rooms.map(r => `<option value="${r}">${r}</option>`).join('');
-        }
-    },
-    // --- BAGIAN YANG HILANG SEBELUMNYA (NAMA FUNGSI) ---
-    navToStudentFilter(type, value) { 
-        // 1. Pindah ke tab students
-        this.nav('students');
-        
-        // 2. Set nilai filter
-        setTimeout(() => {
-            if(type === 'kelas') {
-                const select = Utils.getEl('filter-class');
-                if(select) { select.value = value; select.dispatchEvent(new Event('change')); }
-            } else if (type === 'ruangan') {
-                const select = Utils.getEl('filter-room');
-                if(select) { select.value = value; select.dispatchEvent(new Event('change')); }
-            }
-            // 3. Render ulang
-            this.renderStudents(true); 
-        }, 100); 
-    }, // <--- JANGAN LUPA KOMA INI JUGA
-
-    togglePass(index, realPass) {
-        const textEl = Utils.getEl(`pass-text-${index}`);
-        const iconEl = Utils.getEl(`icon-pass-${index}`);
-        
-        if (!textEl) return;
-    
-        if (textEl.innerText === '***') {
-            textEl.innerText = realPass;
-            textEl.classList.add('text-blue-600', 'font-bold');
-            if(iconEl) iconEl.classList.add('text-blue-600'); 
-        } else {
-            textEl.innerText = '***';
-            textEl.classList.remove('text-blue-600', 'font-bold');
-            if(iconEl) iconEl.classList.remove('text-blue-600');
-        }
-    },
-    // 1. Variabel untuk menyimpan data yang dicentang
-    selectedItems: [],
-
-    // 2. Fungsi saat checkbox baris diklik
-    toggleSelect(id, isChecked) {
-        if (isChecked) {
-            this.selectedItems.push(id);
-        } else {
-            this.selectedItems = this.selectedItems.filter(item => item !== id);
-        }
-        this.updateBulkButtonUI(); // Panggil Fungsi Baru
-    },
-
-    // 3. Fungsi saat checkbox "Pilih Semua" di header diklik
-    // --- UPDATE FUNGSI INI ---
-    toggleSelectAll(source, dataCache, keyName = 'name') {
-        // keyName default 'name' (untuk kelas/ruang), tapi bisa diisi 'id_peserta'
-        
-        const checkboxes = document.querySelectorAll('.row-checkbox');
-        checkboxes.forEach(cb => cb.checked = source.checked);
-        
-        if (source.checked) {
-            // Mapping berdasarkan keyName yang dinamis
-            this.selectedItems = dataCache.map(item => item[keyName]); 
-        } else {
-            this.selectedItems = [];
-        }
-        this.updateBulkButtonUI();
-    },
-    async renderStudents(useCache = false) {
-        // 1. Reset seleksi jika bukan refresh cache (agar menu hilang saat pindah tab)
-        if(!useCache) { this.selectedItems = []; this.updateBulkButtonUI(); }
-
-        const tbody = Utils.getEl('table-students-body');
-        
-        // 2. Loading State & Fetch Data
-        if (!useCache || STATE.cache.students.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8"><span class="animate-spin">⏳</span> Memuat...</td></tr>`;
-            STATE.cache.students = await DB.getStudents();
-        }
-
-        const filterClass = Utils.getEl('filter-class')?.value || 'Semua';
-        const filterRoom = Utils.getEl('filter-room')?.value || 'Semua';
-
-        const html = STATE.cache.students.map((s, i) => {
-            // Filter Data
-            if (filterClass !== 'Semua' && s.kelas !== filterClass) return '';
-            if (filterRoom !== 'Semua' && s.ruangan !== filterRoom) return '';
-
-            // Render Password (Fitur Intip)
-            const passwordHtml = `
-                <div class="flex items-center justify-center gap-2">
-                    <span id="pass-text-${i}" class="font-mono text-xs tracking-widest">***</span>
-                    <button onclick="View.togglePass(${i}, '${Utils.escapeHTML(s.pass)}')" class="text-slate-400 hover:text-blue-600"><i data-feather="eye" class="w-3.5 h-3.5"></i></button>
-                </div>`;
-
-            return `
-            <tr class="border-b hover:bg-slate-50 transition group-row">
-                <td class="px-2 py-3 text-center">
-                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
-                        value="${Utils.escapeHTML(s.id_peserta)}"
-                        ${View.selectedItems.includes(s.id_peserta) ? 'checked' : ''}
-                        onchange="View.toggleSelect('${Utils.escapeHTML(s.id_peserta)}', this.checked)">
-                </td>
-                
-                <td class="px-2 py-3 text-center relative">
-                    <button onclick="toggleActionDropdown('stu-${i}', event)" class="bg-blue-50 p-1 rounded hover:bg-blue-100 text-blue-600"><i data-feather="more-horizontal" class="w-3.5 h-3.5"></i></button>
-                    <div id="dropdown-stu-${i}" class="action-dropdown text-left z-50">
-                        <button onclick="View.nav('add-student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50">Edit Data</button>
-                        <button onclick="View.modals.confirmDelete('${Utils.escapeHTML(s.id_peserta)}', 'student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
-                    </div>
-                </td>
-                <td class="px-2 py-3 text-center text-[10px]">${i + 1}</td>
-                <td class="px-2 py-3 font-mono text-xs">${Utils.escapeHTML(s.username)}</td>
-                <td class="px-2 py-3 text-center">${passwordHtml}</td>
-                <td class="px-2 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(s.nama)}</td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.id_peserta)}</td>
-                <td class="px-2 py-3"><span class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.kelas)}</span></td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.ruangan)}</td>
-                <td class="px-2 py-3 text-center"><span class="bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.sesi)}</span></td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.sekolah)}</td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.agama)}</td>
-                <td class="px-2 py-3 text-xs italic">${Utils.escapeHTML(s.catatan)}</td>
-            </tr>`;
-        }).join('');
-        
-        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-4 text-xs">Data kosong.</td></tr>`;
-        if (typeof feather !== 'undefined') feather.replace();
-    },
-    async renderClasses() {
-        // Reset seleksi setiap kali halaman dirender ulang
-        this.selectedItems = []; 
-        this.updateBulkButtonUI();
-
-        const tbody = Utils.getEl('table-classes-body');
-        
-        // Ambil data terbaru
-        STATE.cache.classes = await DB.getClasses();
-        
-        const html = STATE.cache.classes.map((item, i) => `
-            <tr class="border-b hover:bg-slate-50 transition">
-                <td class="px-4 py-3 text-center">
-                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
-                        onchange="View.toggleSelect('${Utils.escapeHTML(item.name)}', this.checked)">
-                </td>
-                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
-                <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
-                <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
-                <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
-                
-                <td class="px-4 py-3">
-                    <button onclick="View.navToStudentFilter('kelas', '${Utils.escapeHTML(item.name)}')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
-                        <i data-feather="users" class="w-3 h-3"></i> (${item.count || 0}) Peserta
-                    </button>
-                </td>
-                
-                <td class="px-4 py-3 text-[10px]">${item.date}</td>
-                
-                <td class="px-4 py-3 text-center relative">
-                    <button onclick="toggleActionDropdown('cls-${i}', event)" class="bg-slate-100 p-1.5 rounded hover:bg-slate-200 text-slate-600">
-                        <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
-                    </button>
-                    <div id="dropdown-cls-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right">
-                        <button onclick="View.modals.openEditClass('${item.id}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600">Edit</button>
-                        <button onclick="View.modals.confirmDelete('${item.id}', 'class')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
-                    </div>
-                </td>
-            </tr>`).join('');
-
-        tbody.innerHTML = html;
-        if (typeof feather !== 'undefined') feather.replace();
-    },
-    async renderRooms() {
-        this.selectedItems = [];
-        this.updateBulkButtonUI();
-
-        const tbody = Utils.getEl('table-rooms-body');
-        STATE.cache.rooms = await DB.getRooms();
-        
-        const html = STATE.cache.rooms.map((item, i) => `
-            <tr class="border-b hover:bg-slate-50 transition">
-                <td class="px-4 py-3 text-center">
-                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
-                        onchange="View.toggleSelect('${Utils.escapeHTML(item.name)}', this.checked)">
-                </td>
-                <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
-                <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
-                <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
-                <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
-                
-                <td class="px-4 py-3">
-                     <button onclick="View.navToStudentFilter('ruangan', '${Utils.escapeHTML(item.name)}')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
-                        <i data-feather="users" class="w-3 h-3"></i> (${item.count || 0}) Peserta
-                    </button>
-                </td>
-                
-                <td class="px-4 py-3 text-[10px]">${item.date}</td>
-                
-                <td class="px-4 py-3 text-center relative">
-                     <button onclick="toggleActionDropdown('room-${i}', event)" class="bg-slate-100 p-1.5 rounded hover:bg-slate-200 text-slate-600">
-                        <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
-                    </button>
-                    <div id="dropdown-room-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right">
-                        <button onclick="View.modals.openEditRoom('${item.id}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600">Edit</button>
-                        <button onclick="View.modals.confirmDelete('${item.id}', 'room')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
-                    </div>
-                </td>
-            </tr>`).join('');
-            
-        tbody.innerHTML = html;
-        if (typeof feather !== 'undefined') feather.replace();
-    },
- // Update Tampilan Tombol HTML yang sudah ada
-    updateBulkButtonUI() {
-        // Cari elemen SPAN angka di dalam tombol
-        const countSpan = document.getElementById('selection-count');
-        const btnContainer = document.getElementById('dropdown-bulk-actions');
-        
-        if (countSpan) {
-            // Update Teks Angka
-            countSpan.innerText = `(${this.selectedItems.length}) Terseleksi`;
-        }
-
-        // Sembunyikan dropdown menu jika tidak ada yang dipilih
-        if (this.selectedItems.length === 0 && btnContainer) {
-            btnContainer.classList.add('hidden');
-            btnContainer.classList.remove('block'); // Pastikan tertutup
-        }
-    },
-    async populateStudentForm() {
-        // Ambil elemen select di modal tambah siswa berdasarkan ID
-        const selKelas = document.getElementById('input-kelas');
-        const selRuang = document.getElementById('input-ruangan');
-        
-        // Isi Select Kelas
-        if(selKelas) {
-            selKelas.innerHTML = '<option value="">Memuat data...</option>';
-            const classes = await DB.getClassList(); // Ambil dari DB
-            
-            // Render Option
-            if (classes.length === 0) {
-                 selKelas.innerHTML = `<option value="">Belum ada kelas</option>`;
-            } else {
-                 selKelas.innerHTML = `<option value="">-- Pilih Kelas --</option>` + 
-                classes.map(c => `<option value="${c}">${c}</option>`).join('');
-            }
-        }
-
-        // Isi Select Ruangan
-        if(selRuang) {
-            selRuang.innerHTML = '<option value="">Memuat data...</option>';
-            const rooms = await DB.getRoomList(); // Ambil dari DB
-            
-             if (rooms.length === 0) {
-                 selRuang.innerHTML = `<option value="">Belum ada ruangan</option>`;
-            } else {
-                selRuang.innerHTML = `<option value="">-- Pilih Ruangan --</option>` + 
-                rooms.map(r => `<option value="${r}">${r}</option>`).join('');
-            }
-        }
-    },
-    // ▼▼▼ TEMPEL KODE INI DI SINI ▼▼▼
-    
-    async populateBulkDropdowns() {
-        const selClass = document.getElementById('bulk-input-class');
-        const selRoom = document.getElementById('bulk-input-room');
-        const selExam = document.getElementById('bulk-input-exam'); 
-
-        // 1. Isi Dropdown Kelas
-        if (selClass) {
-            selClass.innerHTML = '<option value="">Sedang memuat...</option>';
-            const classes = await DB.getClassList();
-            selClass.innerHTML = classes.length === 0 
-                ? '<option value="">Belum ada data kelas</option>' 
-                : `<option value="">-- Pilih Kelas Tujuan --</option>` + classes.map(c => `<option value="${c}">${c}</option>`).join('');
-        }
-
-        // 2. Isi Dropdown Ruangan
-        if (selRoom) {
-            selRoom.innerHTML = '<option value="">Sedang memuat...</option>';
-            const rooms = await DB.getRoomList();
-            selRoom.innerHTML = rooms.length === 0 
-                ? '<option value="">Belum ada data ruangan</option>' 
-                : `<option value="">-- Pilih Ruangan Tujuan --</option>` + rooms.map(r => `<option value="${r}">${r}</option>`).join('');
-        }
-
-        // 3. Isi Dropdown Ujian
-        if (selExam) {
-            selExam.innerHTML = '<option value="">Sedang memuat...</option>';
-            // Pastikan Anda sudah menambahkan getExamList di DB (Langkah 1 sebelumnya)
-            const exams = await DB.getExamList(); 
-            selExam.innerHTML = exams.length === 0 
-                ? '<option value="">Tidak ada ujian aktif</option>' 
-                : `<option value="">-- Pilih Ujian --</option>` + exams.map(e => `<option value="${e.id}">${e.nama_ujian}</option>`).join('');
-        }
-    },
     async renderExamList() {
         const container = Utils.getEl('exam-list-body');
+        if (!container) return;
         container.innerHTML = `<tr><td colspan="8" class="text-center py-8">⏳ Memuat...</td></tr>`;
         STATE.cache.exams = await DB.getExams();
         
@@ -731,42 +726,90 @@ const View = {
                 <td class="py-3 px-4 text-xs">-</td>
             </tr>`;
         }).join('');
-        container.innerHTML = html;
+        container.innerHTML = html || `<tr><td colspan="8" class="text-center py-4">Belum ada ujian.</td></tr>`;
         if (typeof feather !== 'undefined') feather.replace();
     },
 
-    renderQuestions() {
+    async renderQuestions() {
         const tbody = Utils.getEl('question-list-body');
-        tbody.innerHTML = '';
-        if(STATE.cache.questions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-xs text-slate-400">Belum ada soal.</td></tr>';
-            return;
-        }
-        STATE.cache.questions.forEach((q, i) => {
-            tbody.innerHTML += `
+        if (!tbody) return;
+        tbody.innerHTML = `<tr><td colspan="5" class="text-center py-8">⏳ Memuat...</td></tr>`;
+        STATE.cache.questions = await DB.getQuestions(); 
+        
+        const html = STATE.cache.questions.map((q, i) => `
             <tr class="border-b">
                 <td class="px-4 py-3 text-xs">${i+1}</td>
-                <td class="px-4 py-3 text-xs truncate max-w-xs">${Utils.escapeHTML(q.text)}</td>
+                <td class="px-4 py-3 text-xs truncate max-w-xs">${Utils.escapeHTML(q.text || 'Tanpa Teks')}</td>
                 <td class="px-4 py-3"><span class="bg-blue-50 text-blue-600 px-2 py-1 rounded text-[10px] uppercase">${q.type}</span></td>
                 <td class="px-4 py-3">${q.media ? '<i data-feather="paperclip" class="w-3 h-3"></i>' : '-'}</td>
                 <td class="px-4 py-3 text-center"><button class="text-red-500"><i data-feather="trash-2" class="w-4 h-4"></i></button></td>
-            </tr>`;
-        });
+            </tr>`).join('');
+        tbody.innerHTML = html || `<tr><td colspan="5" class="text-center py-4 text-xs text-slate-400">Belum ada soal.</td></tr>`;
         feather.replace();
     },
 
-    switchBankTab(tab) {
-        ['view-bank-soal', 'view-bank-ujian', 'view-exam-detail', 'view-exam-participants'].forEach(id => Utils.getEl(id).classList.add('hidden-view'));
-        ['tab-soal', 'tab-ujian'].forEach(id => Utils.getEl(id).classList.remove('active'));
+    async renderConnections() {
+        const tbody = Utils.getEl('table-connections-body');
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8"><span class="animate-spin">⏳</span> Memuat data perangkat...</td></tr>`;
+        STATE.cache.logs = await DB.getDeviceLogs(); 
         
-        Utils.getEl('view-bank-'+tab).classList.remove('hidden-view');
-        Utils.getEl('tab-'+tab).classList.add('active');
+        if (STATE.cache.logs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4">Belum ada riwayat.</td></tr>`;
+            return;
+        }
+
+        const html = STATE.cache.logs.map((log, i) => `
+            <tr onclick="View.showConnectionDetail(${i})" class="border-b hover:bg-blue-50 cursor-pointer transition group">
+                <td class="px-4 py-3 text-center text-[10px]">${i + 1}</td>
+                <td class="px-4 py-3 font-mono text-xs font-bold text-blue-600 group-hover:underline">${Utils.escapeHTML(log.device_id)}</td>
+                <td class="px-4 py-3 text-xs">
+                    <div class="flex items-center gap-2">
+                        <i data-feather="${log.device_name.includes('Mobile') || log.device_name.includes('Android') ? 'smartphone' : 'monitor'}" class="w-3 h-3 text-slate-400"></i>
+                        ${Utils.escapeHTML(log.device_name)}
+                    </div>
+                </td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-500">${Utils.escapeHTML(log.ip_address)}</td>
+                <td class="px-4 py-3 text-xs">
+                    ${new Date(log.last_seen).toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}
+                </td>
+                <td class="px-4 py-3 text-center text-xs font-bold bg-slate-50 rounded">${log.visit_count || 1}</td>
+            </tr>
+        `).join('');
+        tbody.innerHTML = html;
+        feather.replace();
+    },
+
+    showConnectionDetail(index) {
+        const log = STATE.cache.logs[index];
+        if(!log) return;
+        Utils.getEl('detail-device-id').innerText = log.device_id;
+        Utils.getEl('detail-device-name').innerText = log.device_name;
+        Utils.getEl('detail-ip').innerText = log.ip_address;
+        Utils.getEl('detail-last-seen').innerText = new Date(log.last_seen).toLocaleString('id-ID', {weekday:'long', day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'});
+        Utils.getEl('detail-visits').innerText = log.visit_count || 1;
+        Utils.getEl('modal-connection-detail').classList.remove('hidden');
+    },
+
+    switchBankTab(tab) {
+        ['view-bank-soal', 'view-bank-ujian', 'view-exam-detail', 'view-exam-participants'].forEach(id => {
+            if(Utils.getEl(id)) Utils.getEl(id).classList.add('hidden-view');
+        });
+        ['tab-soal', 'tab-ujian'].forEach(id => {
+            if(Utils.getEl(id)) Utils.getEl(id).classList.remove('active');
+        });
+        
+        if(Utils.getEl('view-bank-'+tab)) Utils.getEl('view-bank-'+tab).classList.remove('hidden-view');
+        if(Utils.getEl('tab-'+tab)) Utils.getEl('tab-'+tab).classList.add('active');
+        
         if(tab === 'ujian') this.renderExamList();
+        if(tab === 'soal') this.renderQuestions();
     },
 
     switchSettingTab(e, tabId) {
         document.querySelectorAll('.setting-content').forEach(c => c.classList.add('hidden-view'));
-        Utils.getEl('set-' + tabId).classList.remove('hidden-view');
+        const target = Utils.getEl('set-' + tabId);
+        if(target) target.classList.remove('hidden-view');
+        
         document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
         if (e && e.currentTarget) e.currentTarget.classList.add('active');
     },
@@ -855,57 +898,8 @@ const View = {
         Utils.getEl('view-exam-settings').classList.add('hidden-view');
         Utils.getEl('panel-questions').classList.remove('hidden-view');
         this.switchBankTab('ujian');
-    },
-    async renderConnections() {
-    const tbody = Utils.getEl('table-connections-body');
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center py-8"><span class="animate-spin">⏳</span> Memuat data perangkat...</td></tr>`;
-    
-    // Simpan logs di state agar bisa diambil datanya untuk modal
-    STATE.cache.logs = await DB.getDeviceLogs(); // Pastikan simpan ke cache
-    
-    if (STATE.cache.logs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4">Belum ada riwayat.</td></tr>`;
-        return;
     }
-
-    const html = STATE.cache.logs.map((log, i) => `
-        <tr onclick="View.showConnectionDetail(${i})" class="border-b hover:bg-blue-50 cursor-pointer transition group">
-            <td class="px-4 py-3 text-center text-[10px]">${i + 1}</td>
-            <td class="px-4 py-3 font-mono text-xs font-bold text-blue-600 group-hover:underline">${Utils.escapeHTML(log.device_id)}</td>
-            <td class="px-4 py-3 text-xs">
-                <div class="flex items-center gap-2">
-                    <i data-feather="${log.device_name.includes('Mobile') || log.device_name.includes('Android') ? 'smartphone' : 'monitor'}" class="w-3 h-3 text-slate-400"></i>
-                    ${Utils.escapeHTML(log.device_name)}
-                </div>
-            </td>
-            <td class="px-4 py-3 font-mono text-xs text-slate-500">${Utils.escapeHTML(log.ip_address)}</td>
-            <td class="px-4 py-3 text-xs">
-                ${new Date(log.last_seen).toLocaleString('id-ID', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'})}
-            </td>
-            <td class="px-4 py-3 text-center text-xs font-bold bg-slate-50 rounded">${log.visit_count || 1}</td>
-        </tr>
-    `).join('');
-    
-    tbody.innerHTML = html;
-    feather.replace();
-},
-
-// Fungsi Baru untuk menampilkan Modal
-showConnectionDetail(index) {
-    const log = STATE.cache.logs[index];
-    if(!log) return;
-
-    Utils.getEl('detail-device-id').innerText = log.device_id;
-    Utils.getEl('detail-device-name').innerText = log.device_name;
-    Utils.getEl('detail-ip').innerText = log.ip_address;
-    Utils.getEl('detail-last-seen').innerText = new Date(log.last_seen).toLocaleString('id-ID', {weekday:'long', day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit'});
-    Utils.getEl('detail-visits').innerText = log.visit_count || 1;
-    
-    Utils.getEl('modal-connection-detail').classList.remove('hidden');
-}
-    
 };
-
 // ============================================================================
 // 6. BUSINESS LOGIC CONTROLLERS
 // ============================================================================
@@ -1521,6 +1515,11 @@ window.onclick = (e) => {
 };
 // Start App
 document.addEventListener("DOMContentLoaded", () => App.init());
+
+
+
+
+
 
 
 
