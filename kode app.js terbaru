@@ -23,6 +23,7 @@ const STATE = {
         classId: null,
         roomId: null,
         examId: null,
+        studentId: null, // <--- TAMBAHAN BARU
         pendingDeleteId: null,
         pendingDeleteType: null
     },
@@ -62,11 +63,16 @@ const Utils = {
 
     getEl(id) { return document.getElementById(id); },
 
-    setLoading(btn, isLoading, text = 'Loading...') {
+    setLoading(btn, isLoading, text = 'Memproses...') {
         if (!btn) return;
         if (isLoading) {
             btn.dataset.originalText = btn.innerHTML;
-            btn.innerHTML = `<span class="animate-spin">⏳</span> ${text}`;
+            // Menggunakan SVG Spinner yang modern
+            btn.innerHTML = `
+                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg> ${text}`;
             btn.disabled = true;
             btn.classList.add('opacity-75', 'cursor-not-allowed');
         } else {
@@ -91,6 +97,16 @@ const DB = {
         const { data, error } = await db.from('students').select('*').order('created_at', { ascending: false });
         if (error) return [];
         return data;
+    },
+    // Update data siswa berdasarkan ID
+   // Update Single Student (Edit)
+    async updateStudent(id, data) {
+        // Bersihkan data undefined
+        Object.keys(data).forEach(key => data[key] === undefined && delete data[key]);
+        
+        // Lakukan update berdasarkan ID (Primary Key)
+        const { error } = await db.from('students').update(data).eq('id', id);
+        return { error };
     },
 
     // --- DATA UTAMA (KELAS, RUANG, UJIAN) ---
@@ -127,7 +143,32 @@ const DB = {
         const { data } = await db.from('exams').select('id, nama_ujian').eq('status', 'Aktif');
         return data || [];
     },
+    // --- FUNGSI BARU: UPLOAD FOTO ---
+    async uploadPhoto(file) {
+        if (!file) return null;
 
+        // 1. Buat nama file unik (timestamp + nama file asli yang disanitasi)
+        const fileExt = file.name.split('.').pop();
+        const fileName = `student_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        // 2. Upload ke Supabase Storage (Bucket: 'student-photos')
+        const { data, error } = await db.storage
+            .from('student-photos')
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: false
+            });
+
+        if (error) throw error;
+
+        // 3. Ambil Public URL agar bisa diakses
+        const { data: publicUrlData } = db.storage
+            .from('student-photos')
+            .getPublicUrl(filePath);
+
+        return publicUrlData.publicUrl;
+    },
     // --- FUNGSI TOKEN & PENGATURAN ---
     async updateToken(tokenCode) {
         // Update Token Code saja
@@ -156,16 +197,45 @@ const DB = {
         const { error } = await db.from('students').update(updateData).in(filterCol, filterValues);
         return { error };
     },
-    async bulkDeleteStudents(ids) {
-        const { error } = await db.from('students').delete().in('id_peserta', ids);
-        return { error };
+    // 1. Update Data Massal (Untuk Kelas, Ruangan, Sesi, Password)
+    async bulkUpdateStudents(ids, updateData) {
+        // ids: Array ID Peserta ['1001', '1002']
+        // updateData: Object { kelas: 'XII IPA 1' }
+        const { data, error } = await db
+            .from('students')
+            .update(updateData)
+            .in('id', ids)
+            .select();
+        return { data, error };
     },
-    async registerExamParticipants(examId, studentIds) {
-        const records = studentIds.map(sid => ({ exam_id: examId, student_id: sid, status: 'Terdaftar', created_at: new Date() }));
-        const { error } = await db.from('exam_participants').insert(records);
+
+    // 2. Hapus Data Massal
+    async bulkDeleteStudents(ids) {
+        const { error } = await db
+            .from('students')
+            .delete()
+            .in('id', ids);
         return { error };
     },
 
+    // 3. Daftarkan Peserta ke Ujian
+    async registerExamParticipants(examId, studentIds) {
+        // Siapkan data untuk diinsert banyak sekaligus
+        const records = studentIds.map(sid => ({
+            exam_id: examId,
+            student_id: sid, // Pastikan ID ini sesuai tipe data di DB (UUID/BigInt)
+            status: 'Terdaftar',
+            created_at: new Date()
+        }));
+
+        // Gunakan upsert atau insert dengan ignoreDuplicates agar tidak error jika sudah terdaftar
+        const { error } = await db
+            .from('exam_participants')
+            .insert(records)
+            .select(); // Tambahkan select untuk debug
+            
+        return { error };
+    },
     // --- HELPERS ---
     async getCount(table) { const { count } = await db.from(table).select('*', { count: 'exact', head: true }); return count || 0; },
     async getCountByFilter(table, col, val) { const { count } = await db.from(table).select('*', { count: 'exact', head: true }).eq(col, val); return count || 0; },
@@ -326,7 +396,6 @@ const View = {
         }
 
         // --- LOGIKA PER HALAMAN (HANYA TULIS SATU KALI) ---
-
         // A. Dashboard
         if (panelId === 'dashboard') this.updateDashboard();
         
@@ -422,27 +491,31 @@ const View = {
     },
 
     async populateStudentForm() {
-        const selKelas = document.getElementById('input-kelas');
-        const selRuang = document.getElementById('input-ruangan');
+        const k = Utils.getEl('input-kelas');
+        const r = Utils.getEl('input-ruangan');
+        // const a = Utils.getEl('input-agama'); // Agama statis, tidak perlu fetch DB
         
-        if(selKelas) {
-            selKelas.innerHTML = '<option value="">Memuat data...</option>';
-            const classes = await DB.getClassList();
-            selKelas.innerHTML = classes.length === 0 
-                 ? `<option value="">Belum ada kelas</option>`
-                 : `<option value="">-- Pilih Kelas --</option>` + classes.map(c => `<option value="${c}">${c}</option>`).join('');
-        }
-        if(selRuang) {
-            selRuang.innerHTML = '<option value="">Memuat data...</option>';
-            const rooms = await DB.getRoomList();
-             if (rooms.length === 0) {
-                 selRuang.innerHTML = `<option value="">Belum ada ruangan</option>`;
+        if(k && r) {
+            // Ambil data dari DB
+            const [classes, rooms] = await Promise.all([DB.getClassList(), DB.getRoomList()]);
+            
+            // Render Kelas
+            if (classes.length > 0) {
+                k.innerHTML = `<option value="">-- Pilih Kelas --</option>` + 
+                              classes.map(i => `<option value="${i}">${i}</option>`).join('');
             } else {
-                selRuang.innerHTML = `<option value="">-- Pilih Ruangan --</option>` + rooms.map(r => `<option value="${r}">${r}</option>`).join('');
+                k.innerHTML = `<option value="">Belum ada kelas</option>`;
+            }
+
+            // Render Ruangan
+            if (rooms.length > 0) {
+                r.innerHTML = `<option value="">-- Pilih Ruangan --</option>` + 
+                              rooms.map(i => `<option value="${i}">${i}</option>`).join('');
+            } else {
+                r.innerHTML = `<option value="">Belum ada ruangan</option>`;
             }
         }
     },
-
     async populateBulkDropdowns() {
         const selClass = document.getElementById('bulk-input-class');
         const selRoom = document.getElementById('bulk-input-room');
@@ -494,44 +567,83 @@ const View = {
         const filterRoom = Utils.getEl('filter-room')?.value || 'Semua';
 
         const html = STATE.cache.students.map((s, i) => {
+            // Filter Logika
             if (filterClass !== 'Semua' && s.kelas !== filterClass) return '';
             if (filterRoom !== 'Semua' && s.ruangan !== filterRoom) return '';
 
+            // --- DATA PENTING (JANGAN SALAH AMBIL) ---
+            const internalId = s.id; // ID Database (Untuk Checkbox/Hapus)
+            const nisn = s.id_peserta || '-'; // ID Peserta/NISN (Untuk Tampilan)
+            
+            // Handle variasi nama kolom database
+            const namaSiswa = s.nama_lengkap || s.nama || '-'; 
+            const passSiswa = s.password || s.pass || '';
+            const username = s.username || '-';
+            const kelas = s.kelas || '-';
+            const ruangan = s.ruangan || '-';
+            const sesi = s.sesi || '-';
+
+            // --- HTML PASSWORD MODERN ---
             const passwordHtml = `
-                <div class="flex items-center justify-center gap-2">
-                    <span id="pass-text-${i}" class="font-mono text-xs tracking-widest">***</span>
-                    <button onclick="View.togglePass(${i}, '${Utils.escapeHTML(s.pass)}')" class="text-slate-400 hover:text-blue-600"><i data-feather="eye" class="w-3.5 h-3.5"></i></button>
+                <div class="relative flex items-center justify-center group/pass w-28 mx-auto">
+                    <input type="password" 
+                           value="${Utils.escapeHTML(passSiswa)}" 
+                           id="pass-input-${i}" 
+                           readonly
+                           class="w-full text-center bg-transparent border-none outline-none font-mono text-xs tracking-widest text-slate-600 cursor-default focus:ring-0 px-0">
+                    
+                    <button onclick="View.togglePass(${i})" 
+                            class="absolute -right-2 p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all opacity-0 group-hover/pass:opacity-100 focus:opacity-100"
+                            title="Lihat Password">
+                        <i data-feather="eye" id="icon-pass-${i}" class="w-3.5 h-3.5 transition-transform"></i>
+                    </button>
                 </div>`;
 
+            // --- HTML ROW ---
             return `
             <tr class="border-b hover:bg-slate-50 transition group-row">
-                <td class="px-2 py-3 text-center">
-                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
-                        value="${Utils.escapeHTML(s.id_peserta)}"
-                        ${View.selectedItems.includes(s.id_peserta) ? 'checked' : ''}
-                        onchange="View.toggleSelect('${Utils.escapeHTML(s.id_peserta)}', this.checked)">
+                <td class="px-4 py-3 text-center w-10">
+                    <input type="checkbox" class="row-checkbox w-3.5 h-3.5 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                        value="${internalId}"
+                        ${View.selectedItems.includes(String(internalId)) ? 'checked' : ''}
+                        onclick="View.toggleSelect('${internalId}', this.checked)">
                 </td>
-                <td class="px-2 py-3 text-center relative">
-                    <button onclick="toggleActionDropdown('stu-${i}', event)" class="bg-blue-50 p-1 rounded hover:bg-blue-100 text-blue-600"><i data-feather="more-horizontal" class="w-3.5 h-3.5"></i></button>
-                    <div id="dropdown-stu-${i}" class="action-dropdown text-left z-50">
-                        <button onclick="View.nav('add-student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50">Edit Data</button>
-                        <button onclick="View.modals.confirmDelete('${Utils.escapeHTML(s.id_peserta)}', 'student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
+
+                <td class="px-2 py-3 text-center relative w-12">
+                    <button onclick="toggleActionDropdown('stu-${i}', event)" class="bg-blue-50 p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors">
+                        <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
+                    </button>
+                    <div id="dropdown-stu-${i}" class="action-dropdown text-left z-50 hidden absolute left-0 mt-1 w-32 bg-white rounded-lg shadow-lg border border-slate-100 py-1">
+                        <button onclick="StudentController.prepareEdit('${internalId}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-600 font-medium">Edit Data</button>
+                        <button onclick="View.modals.confirmDelete('${internalId}', 'student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 font-medium">Hapus</button>
                     </div>
                 </td>
-                <td class="px-2 py-3 text-center text-[10px]">${i + 1}</td>
-                <td class="px-2 py-3 font-mono text-xs">${Utils.escapeHTML(s.username)}</td>
+
+                <td class="px-4 py-3 text-center text-[10px] text-slate-400 font-medium w-10">${i + 1}</td>
+
+                <td class="px-4 py-3 font-mono text-xs text-slate-600 font-medium">${Utils.escapeHTML(username)}</td>
+                
                 <td class="px-2 py-3 text-center">${passwordHtml}</td>
-                <td class="px-2 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(s.nama)}</td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.id_peserta)}</td>
-                <td class="px-2 py-3"><span class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.kelas)}</span></td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.ruangan)}</td>
-                <td class="px-2 py-3 text-center"><span class="bg-slate-100 px-1.5 py-0.5 rounded text-[10px] font-bold">${Utils.escapeHTML(s.sesi)}</span></td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.sekolah)}</td>
-                <td class="px-2 py-3 text-xs">${Utils.escapeHTML(s.agama)}</td>
-                <td class="px-2 py-3 text-xs italic">${Utils.escapeHTML(s.catatan)}</td>
+                
+                <td class="px-4 py-3 font-bold text-xs uppercase text-slate-700 min-w-[150px]">${Utils.escapeHTML(namaSiswa)}</td>
+                
+                <td class="px-4 py-3 text-xs font-mono text-slate-500">${Utils.escapeHTML(nisn)}</td>
+                
+                <td class="px-4 py-3"><span class="bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-md text-[10px] font-bold border border-indigo-100">${Utils.escapeHTML(kelas)}</span></td>
+                
+                <td class="px-4 py-3 text-xs text-slate-600">${Utils.escapeHTML(ruangan)}</td>
+                
+                <td class="px-4 py-3 text-center"><span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] font-bold border border-slate-200">${Utils.escapeHTML(sesi)}</span></td>
+                
+                <td class="px-4 py-3 text-xs text-slate-500">${Utils.escapeHTML(s.sekolah || '-')}</td>
+                
+                <td class="px-4 py-3 text-xs text-slate-500">${Utils.escapeHTML(s.agama || '-')}</td>
+                
+                <td class="px-4 py-3 text-xs italic text-slate-400 truncate max-w-[100px]" title="${Utils.escapeHTML(s.catatan)}">${Utils.escapeHTML(s.catatan || '-')}</td>
             </tr>`;
         }).join('');
-        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-4 text-xs">Data kosong.</td></tr>`;
+        
+        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-8 text-xs text-slate-400 italic">Data peserta tidak ditemukan.</td></tr>`;
         if (typeof feather !== 'undefined') feather.replace();
     },
 
@@ -622,20 +734,44 @@ const View = {
         }, 100); 
     }, 
 
-    togglePass(index, realPass) {
-        const textEl = Utils.getEl(`pass-text-${index}`);
-        const iconEl = Utils.getEl(`icon-pass-${index}`);
+        togglePass(index) {
+        // 1. Ambil elemen input dan tombol
+        const inputEl = Utils.getEl(`pass-input-${index}`);
+        // Cari tombol pembungkus icon (karena feather me-replace tag <i> dengan <svg>)
+        const btnEl = document.querySelector(`button[onclick="View.togglePass(${index})"]`);
         
-        if (!textEl) return;
-        if (textEl.innerText === '***') {
-            textEl.innerText = realPass;
-            textEl.classList.add('text-blue-600', 'font-bold');
-            if(iconEl) iconEl.classList.add('text-blue-600'); 
+        if (!inputEl) return;
+    
+        // 2. Cek tipe saat ini
+        if (inputEl.type === "password") {
+            // --- MODE BUKA PASSWORD ---
+            inputEl.type = "text"; // Ubah jadi teks biasa
+            
+            // Styling agar teks terbaca jelas (hilangkan jarak antar huruf)
+            inputEl.classList.remove('tracking-widest');
+            inputEl.classList.add('text-blue-600', 'font-bold');
+            
+            // Ganti ikon jadi 'eye-off' (mata dicoret)
+            if(btnEl) {
+                btnEl.innerHTML = `<i data-feather="eye-off" id="icon-pass-${index}" class="w-3.5 h-3.5 transition-transform text-blue-600"></i>`;
+            }
+    
         } else {
-            textEl.innerText = '***';
-            textEl.classList.remove('text-blue-600', 'font-bold');
-            if(iconEl) iconEl.classList.remove('text-blue-600');
+            // --- MODE TUTUP PASSWORD ---
+            inputEl.type = "password"; // Ubah jadi password (titik-titik)
+            
+            // Kembalikan styling default
+            inputEl.classList.add('tracking-widest');
+            inputEl.classList.remove('text-blue-600', 'font-bold');
+            
+            // Ganti ikon jadi 'eye' (mata biasa)
+            if(btnEl) {
+                btnEl.innerHTML = `<i data-feather="eye" id="icon-pass-${index}" class="w-3.5 h-3.5 transition-transform"></i>`;
+            }
         }
+        
+        // 3. Render ulang ikon feather
+        if (typeof feather !== 'undefined') feather.replace();
     },
 
     async updateDashboard() {
@@ -832,24 +968,54 @@ const View = {
             Utils.getEl('modal-confirm-delete').classList.remove('hidden');
         },
 
-        showSuccess(msg) {
-            const modal = Utils.getEl('modal-success');
+showSuccess(msg) {
+            const m = Utils.getEl('modal-success');
+            if(!m) return;
+            
+            // Set pesan
             Utils.getEl('msg-success').innerText = msg;
-            modal.classList.remove('hidden');
+            
+            // Tampilkan modal
+            m.classList.remove('hidden');
+            
+            // --- PERBAIKAN UTAMA: Selector disesuaikan HTML Baru ---
+            // Cari elemen background (backdrop) dan panel konten
+            // Kita gunakan selector yang lebih fleksibel
+            const backdrop = m.querySelector('div.fixed.bg-slate-900\\/60'); 
+            const panel = m.querySelector('div.relative.transform');
+
+            // Animasi Masuk (Fade In & Scale Up)
             setTimeout(() => {
-                modal.querySelector('.bg-slate-900\\/40').classList.remove('opacity-0');
-                modal.querySelector('.relative').classList.remove('scale-95', 'opacity-0');
-                modal.querySelector('.relative').classList.add('scale-100', 'opacity-100');
+                if(backdrop) backdrop.classList.remove('opacity-0');
+                if(panel) {
+                    panel.classList.remove('scale-95', 'opacity-0');
+                    panel.classList.add('scale-100', 'opacity-100');
+                }
             }, 10);
+            
+            // Auto Close setelah 1.5 detik (sesuai durasi animasi loading bar di HTML)
+            setTimeout(() => {
+                this.closeSuccess();
+            }, 1500); 
         },
 
         closeSuccess() {
-            const modal = Utils.getEl('modal-success');
-            if(!modal) return;
-            modal.querySelector('.bg-slate-900\\/40').classList.add('opacity-0');
-            modal.querySelector('.relative').classList.remove('scale-100', 'opacity-100');
-            modal.querySelector('.relative').classList.add('scale-95', 'opacity-0');
-            setTimeout(() => modal.classList.add('hidden'), 300);
+            const m = Utils.getEl('modal-success');
+            if(!m) return;
+            
+            // Selector yang sama
+            const backdrop = m.querySelector('div.fixed.bg-slate-900\\/60');
+            const panel = m.querySelector('div.relative.transform');
+
+            // Animasi Keluar (Fade Out & Scale Down)
+            if(backdrop) backdrop.classList.add('opacity-0');
+            if(panel) {
+                panel.classList.remove('scale-100', 'opacity-100');
+                panel.classList.add('scale-95', 'opacity-0');
+            }
+            
+            // Sembunyikan elemen setelah animasi selesai (300ms)
+            setTimeout(() => m.classList.add('hidden'), 300);
         },
 
         showError(title, msg) {
@@ -895,8 +1061,114 @@ const View = {
 // 6. BUSINESS LOGIC CONTROLLERS
 // ============================================================================
 const StudentController = {
+    // 1. FUNGSI PERSIAPAN TAMBAH (RESET TOTAL)
+    async prepareAdd() {
+        // A. Reset State ID (Kunci agar tidak dianggap Edit)
+        STATE.editing.studentId = null; 
+        
+        // B. Reset Visual Judul & Tombol
+        const titleEl = document.getElementById('form-student-title');
+        const btnEl = document.getElementById('btn-save-student');
+        
+        if(titleEl) titleEl.innerText = "Tambah Peserta Baru";
+        if(btnEl) {
+            // Kembalikan tombol ke mode Tambah
+            btnEl.innerHTML = `<i data-feather="plus" class="w-3.5 h-3.5"></i> <span>Tambahkan</span>`;
+            if (typeof feather !== 'undefined') feather.replace();
+        }
+
+        // C. Load Dropdown (PENTING: Tunggu sampai selesai)
+        await View.populateStudentForm(); 
+
+        // D. Reset Input Text secara Paksa (Looping ID agar bersih)
+        const inputs = ['input-nama', 'input-id-peserta', 'input-username', 'input-password', 'input-sesi', 'input-sekolah', 'input-catatan'];
+        inputs.forEach(id => {
+            const el = Utils.getEl(id);
+            if(el) el.value = ''; // Kosongkan nilai
+        });
+
+        // E. Reset Select/Dropdown (FIXED: Pilih Index 0 / Default)
+        const selects = ['input-kelas', 'input-ruangan', 'input-agama'];
+        selects.forEach(id => {
+            const el = Utils.getEl(id);
+            if(el) {
+                el.value = "";       // Reset value
+                el.selectedIndex = 0; // Pilih opsi pertama (-- Pilih --)
+            }
+        });
+
+        // F. RESET FOTO & PREVIEW
+        const fileInput = Utils.getEl('file-upload-add');
+        if(fileInput) fileInput.value = ''; // Hapus file yang terpilih
+        
+        Utils.getEl('preview-foto-add').classList.add('hidden');
+        Utils.getEl('preview-foto-add').src = '';
+        Utils.getEl('icon-foto-add').classList.remove('hidden');
+        Utils.getEl('filename-add').innerText = "Tidak ada berkas dipilih.";
+
+        // G. Pindah Halaman
+        View.nav('add-student');
+    },
+
+    // 2. FUNGSI PERSIAPAN EDIT (Isi Form)
+    async prepareEdit(id) {
+        STATE.editing.studentId = id; 
+        
+        const student = STATE.cache.students.find(s => s.id == id || s.id_peserta == id);
+        
+        if (student) {
+            // Ubah Judul & Tombol jadi "Update"
+            const titleEl = document.getElementById('form-student-title');
+            const btnEl = document.getElementById('btn-save-student');
+
+            if(titleEl) titleEl.innerText = "Edit Data Peserta";
+            if(btnEl) {
+                btnEl.innerHTML = `<i data-feather="save" class="w-3.5 h-3.5"></i> <span>Update Data</span>`;
+                if (typeof feather !== 'undefined') feather.replace();
+            }
+
+            // Load dropdown dulu sebelum mengisi value
+            await View.populateStudentForm(); 
+
+            // Isi Form
+            if(Utils.getEl('input-nama')) Utils.getEl('input-nama').value = student.nama_lengkap || student.nama || '';
+            if(Utils.getEl('input-id-peserta')) Utils.getEl('input-id-peserta').value = student.id_peserta || '';
+            if(Utils.getEl('input-username')) Utils.getEl('input-username').value = student.username || '';
+            if(Utils.getEl('input-password')) Utils.getEl('input-password').value = student.password || student.pass || '';
+            if(Utils.getEl('input-sesi')) Utils.getEl('input-sesi').value = student.sesi || '';
+            if(Utils.getEl('input-sekolah')) Utils.getEl('input-sekolah').value = student.sekolah || '';
+            if(Utils.getEl('input-catatan')) Utils.getEl('input-catatan').value = student.catatan || '';
+            
+            // Isi Dropdown (Pastikan value cocok)
+            if(Utils.getEl('input-kelas')) Utils.getEl('input-kelas').value = student.kelas || '';
+            if(Utils.getEl('input-ruangan')) Utils.getEl('input-ruangan').value = student.ruangan || '';
+            if(Utils.getEl('input-agama')) Utils.getEl('input-agama').value = student.agama || '';
+
+            // Handling Foto
+            const imgUrl = student.foto_url || student.foto;
+            if (imgUrl) {
+                Utils.getEl('preview-foto-add').src = imgUrl;
+                Utils.getEl('preview-foto-add').classList.remove('hidden');
+                Utils.getEl('icon-foto-add').classList.add('hidden');
+                Utils.getEl('filename-add').innerText = "Foto tersimpan.";
+            } else {
+                Utils.getEl('preview-foto-add').classList.add('hidden');
+                Utils.getEl('icon-foto-add').classList.remove('hidden');
+                Utils.getEl('filename-add').innerText = "Belum ada foto.";
+            }
+            
+            if(Utils.getEl('file-upload-add')) Utils.getEl('file-upload-add').value = '';
+
+            View.nav('add-student');
+        } else {
+            alert("Data tidak ditemukan. Silakan refresh.");
+        }
+    },
+
+    // 3. FUNGSI SIMPAN (UPLOAD + SAVE + AUTO RESET)
     async save() {
-        const btn = document.querySelector('button[onclick="saveStudentData()"]');
+        const btn = document.getElementById('btn-save-student');
+        
         const data = {
             nama_lengkap: Utils.getEl('input-nama').value,
             id_peserta: Utils.getEl('input-id-peserta').value,
@@ -904,21 +1176,66 @@ const StudentController = {
             password: Utils.getEl('input-password').value,
             kelas: Utils.getEl('input-kelas').value,
             ruangan: Utils.getEl('input-ruangan').value,
-            sesi: Utils.getEl('input-sesi').value
+            sesi: Utils.getEl('input-sesi').value,
+            sekolah: Utils.getEl('input-sekolah').value || '-',
+            agama: Utils.getEl('input-agama').value || '-',
+            catatan: Utils.getEl('input-catatan').value || '-'
         };
-        if (!data.nama_lengkap || !data.username) return alert("Lengkapi data!");
-        
-        Utils.setLoading(btn, true);
-        const { error } = await DB.addStudent(data);
-        Utils.setLoading(btn, false);
-        
-        if (!error) {
-            View.modals.showSuccess("Siswa berhasil ditambahkan!");
-            View.nav('students');
-        } else alert(error.message);
+
+        if (!data.nama_lengkap || !data.username) return alert("Nama dan Username wajib diisi!");
+
+        const fileInput = Utils.getEl('file-upload-add');
+        const file = fileInput && fileInput.files.length > 0 ? fileInput.files[0] : null;
+
+        Utils.setLoading(btn, true, "Memproses...");
+
+        try {
+            if (file) {
+                const photoUrl = await DB.uploadPhoto(file);
+                if (photoUrl) data.foto_url = photoUrl;
+            }
+
+            let result;
+            let isEditMode = STATE.editing.studentId !== null; 
+
+            if (isEditMode) {
+                // UPDATE
+                result = await DB.updateStudent(STATE.editing.studentId, data);
+            } else {
+                // INSERT
+                result = await DB.addStudent(data);
+            }
+
+            if (result.error) throw new Error(result.error.message);
+
+            Utils.setLoading(btn, false);
+            
+            if (isEditMode) {
+                View.modals.showSuccess("Data berhasil diperbarui!");
+                
+                // --- PERBAIKAN UTAMA (FIX BUG 1) ---
+                // Setelah edit sukses, kita RESET state ID agar tidak "nyangkut"
+                STATE.editing.studentId = null; 
+                
+                // Kembalikan tombol dan judul ke default (opsional, tapi aman)
+                const titleEl = document.getElementById('form-student-title');
+                if(titleEl) titleEl.innerText = "Tambah Peserta Baru";
+                
+                View.nav('students'); 
+            } else {
+                View.modals.showSuccess("Siswa berhasil ditambahkan!");
+                this.prepareAdd(); // Reset form total
+            }
+            
+            View.renderStudents(false);
+
+        } catch (err) {
+            Utils.setLoading(btn, false);
+            alert("Terjadi Kesalahan: " + err.message);
+            console.error(err);
+        }
     }
 };
-
 const ClassController = {
     async save() {
         const btn = document.querySelector('#modal-edit-class button[onclick="saveClassData()"]');
@@ -1014,132 +1331,133 @@ const ExamController = {
 // BULK CONTROLLER (LOGIKA EKSEKUSI MASSAL)
 // ============================================================================
 const BulkController = {
-    // 1. Fungsi Execute (Dipanggil saat tombol Simpan di Modal diklik)
+    // A. EKSEKUSI DENGAN INPUT (Pindah Kelas, Ruang, Sesi, Daftar Ujian)
     async execute(actionType) {
-        const items = View.selectedItems; // Ambil ID siswa yang dicentang
-        if (items.length === 0) return alert("Tidak ada siswa yang dipilih!");
+        const items = View.selectedItems; // Berisi array UUID [1, 2, 3...]
+        if (items.length === 0) return alert("Pilih data peserta terlebih dahulu!");
 
-        const btnSave = event.target; // Tombol yang diklik (untuk loading effect)
+        const btnSave = event.target; 
         let inputVal = "";
         let dbField = "";
         let modalId = "";
 
-        // --- TENTUKAN LOGIKA BERDASARKAN ACTION TYPE ---
-        
-        // A. PINDAH KELAS
-        if (actionType === 'move_class') {
-            inputVal = document.getElementById('bulk-input-class').value;
-            dbField = 'kelas';
-            modalId = 'modal-move-class';
-            if (!inputVal) return alert("Silakan pilih kelas tujuan!");
-        } 
-        
-        // B. PINDAH RUANGAN
-        else if (actionType === 'move_room') {
-            inputVal = document.getElementById('bulk-input-room').value;
-            dbField = 'ruangan';
-            modalId = 'modal-move-room';
-            if (!inputVal) return alert("Silakan pilih ruangan tujuan!");
-        } 
-        
-        // C. PINDAH SESI
-        else if (actionType === 'move_session') {
-            inputVal = document.getElementById('bulk-input-session').value;
-            dbField = 'sesi';
-            modalId = 'modal-move-session';
-            if (!inputVal) return alert("Silakan isi nomor sesi!");
-        }
-
-        // D. DAFTARKAN UJIAN
-        else if (actionType === 'register_exam') {
-            inputVal = document.getElementById('bulk-input-exam').value; // Ini Exam ID
+        // 1. DAFTARKAN UJIAN
+        if (actionType === 'register_exam') {
+            inputVal = Utils.getEl('bulk-input-exam').value;
             modalId = 'modal-register-exam';
-            if (!inputVal) return alert("Silakan pilih ujian!");
-            
-            // Eksekusi Khusus untuk Register Ujian
+            if (!inputVal) return alert("Silakan pilih ujian tujuan!");
+
             Utils.setLoading(btnSave, true, "Mendaftarkan...");
+            
+            // --- PERBAIKAN UTAMA DI SINI ---
+            // Langsung kirim 'items' karena isinya sudah ID yang benar (UUID/BigInt)
+            // Tidak perlu query 'select id from students' lagi.
             const { error } = await DB.registerExamParticipants(inputVal, items);
+            
             Utils.setLoading(btnSave, false);
 
             if (!error) {
-                document.getElementById(modalId).classList.add('hidden');
-                View.modals.showSuccess(`Berhasil mendaftarkan ${items.length} siswa ke ujian!`);
-                // Reset Seleksi
-                View.selectedItems = [];
-                View.updateBulkButtonUI();
-                document.querySelectorAll('.row-checkbox').forEach(c => c.checked = false);
+                this.finishAction(modalId, `Berhasil mendaftarkan ${items.length} siswa!`);
             } else {
-                alert("Gagal: " + error.message);
+                alert("Gagal daftar ujian: " + error.message);
+                console.error(error); // Untuk debugging
             }
-            return; // Stop di sini, karena logic di bawah untuk Update Siswa
+            return;
         }
 
-        // --- EKSEKUSI UPDATE SISWA (Kelas, Ruangan, Sesi) ---
+        // 2. LOGIKA PINDAH KELAS / RUANGAN / SESI
+        if (actionType === 'move_class') {
+            inputVal = Utils.getEl('bulk-input-class').value;
+            dbField = 'kelas';
+            modalId = 'modal-move-class';
+            if (!inputVal) return alert("Pilih kelas tujuan!");
+        } 
+        else if (actionType === 'move_room') {
+            inputVal = Utils.getEl('bulk-input-room').value;
+            dbField = 'ruangan';
+            modalId = 'modal-move-room';
+            if (!inputVal) return alert("Pilih ruangan tujuan!");
+        } 
+        else if (actionType === 'move_session') {
+            inputVal = Utils.getEl('bulk-input-session').value;
+            dbField = 'sesi';
+            modalId = 'modal-move-session';
+            if (!inputVal) return alert("Isi sesi baru!");
+        }
+
+        // Eksekusi Update Biasa
         Utils.setLoading(btnSave, true, "Menyimpan...");
         
-        // Siapkan objek update, misal: { kelas: 'XII IPA 1' }
         const updateData = {};
         updateData[dbField] = inputVal;
 
-        // Panggil DB
-        const { error } = await DB.bulkUpdateStudents('id_peserta', items, updateData);
-        
+        const { error } = await DB.bulkUpdateStudents(items, updateData);
         Utils.setLoading(btnSave, false);
 
         if (!error) {
-            // Tutup Modal
-            document.getElementById(modalId).classList.add('hidden');
-            
-            View.modals.showSuccess("Data berhasil diperbarui!");
-            
-            // Refresh Tabel Siswa
-            View.renderStudents(true);
-            
-            // Reset Seleksi & Tombol
-            View.selectedItems = [];
-            View.updateBulkButtonUI();
-            
-            // Uncheck semua checkbox
-            document.querySelectorAll('.row-checkbox').forEach(c => c.checked = false);
+            this.finishAction(modalId, "Data berhasil diperbarui!");
         } else {
-            alert("Gagal memperbarui data: " + error.message);
+            alert("Gagal update: " + error.message);
+            console.error(error);
         }
     },
 
-    // 2. Fungsi Action (Masih dipakai untuk Delete & Random Pass yang tidak butuh Modal Input)
+    // B. EKSEKUSI LANGSUNG (Hapus Data & Random Password)
     async action(type) {
         const items = View.selectedItems;
-        if (items.length === 0) return alert("Pilih data terlebih dahulu!");
+        if (items.length === 0) return alert("Pilih data peserta terlebih dahulu!");
 
-        // HAPUS PESERTA
+        // 1. HAPUS DATA MASSAL
         if (type === 'delete') {
-            if (!confirm(`Yakin ingin MENGHAPUS ${items.length} siswa yang dipilih? Data tidak bisa kembali!`)) return;
+            if (!confirm(`YAKIN HAPUS ${items.length} DATA?\nData yang dihapus tidak bisa kembali!`)) return;
             
-            // Tampilkan loading di dropdown menu (opsional)
-            const { error } = await DB.bulkDeleteStudents('id_peserta', items);
+            const { error } = await DB.bulkDeleteStudents(items);
             
             if (!error) {
-                alert("Data berhasil dihapus!");
-                View.renderStudents(true);
-                View.selectedItems = [];
-                View.updateBulkButtonUI();
+                this.finishAction(null, "Data berhasil dihapus permanen.");
             } else {
-                alert("Gagal: " + error.message);
+                alert("Gagal hapus: " + error.message);
+                console.error(error);
             }
+        }
+
+        // 2. RANDOM PASSWORD MASSAL
+        else if (type === 'random_pass') {
+            if (!confirm(`Reset password acak untuk ${items.length} siswa?`)) return;
+
+            const newPass = Math.random().toString(36).slice(-6).toUpperCase();
+            
+            // Update kedua kolom (password & pass) agar aman
+            const { error } = await DB.bulkUpdateStudents(items, { 
+                password: newPass,
+            });
+
+            if (!error) {
+                this.finishAction(null, `Password berhasil direset menjadi: ${newPass}`);
+            } else {
+                alert("Gagal reset password: " + error.message);
+                console.error(error);
+            }
+        }
+    },
+
+    // C. Helper Selesai Aksi
+    finishAction(modalId, msg) {
+        if (modalId) {
+            const modal = document.getElementById(modalId);
+            if(modal) modal.classList.add('hidden');
         }
         
-        // RANDOM PASSWORD
-        else if (type === 'random_pass') {
-            if (!confirm(`Reset password acak untuk ${items.length} siswa terpilih?`)) return;
-            
-            const newPass = Math.random().toString(36).slice(-6); 
-            const { error } = await DB.bulkUpdateStudents('id_peserta', items, { password: newPass, pass: newPass });
-            
-            if(!error) {
-                alert(`Berhasil! Password siswa diubah menjadi: ${newPass}`);
-                View.renderStudents(true);
-            }
-        }
+        View.modals.showSuccess(msg);
+        
+        // Refresh Tabel & Reset Seleksi
+        View.renderStudents(false); 
+        View.selectedItems = [];
+        View.updateBulkButtonUI();
+        
+        // Uncheck header checkbox
+        const checkAll = document.getElementById('check-all-students');
+        if(checkAll) checkAll.checked = false;
     }
 };
 // ============================================================================
@@ -1504,8 +1822,90 @@ window.onclick = (e) => {
     }
     // ... fungsi closeDropdowns lain ...
 };
+// ... (kode sebelumnya tetap sama) ...
+
+// Tutup dropdown jika klik di luar
+window.onclick = (e) => {
+    if (!e.target.closest('#dropdown-bulk-actions') && !e.target.closest('button[onclick="toggleBulkActions(event)"]')) {
+        const dropdown = document.getElementById('dropdown-bulk-actions');
+        if (dropdown) {
+            dropdown.classList.add('hidden');
+            dropdown.classList.remove('block');
+        }
+    }
+    // ... fungsi closeDropdowns lain ...
+};
+// Fungsi Helper untuk membuka modal Bulk Action sekaligus memuat datanya
+window.openBulkModal = (modalId) => {
+    // 1. Load data dropdown dari database
+    View.populateBulkDropdowns(); 
+    
+    // 2. Tampilkan modal yang diminta
+    const modal = document.getElementById(modalId);
+    if(modal) modal.classList.remove('hidden');
+};
+// Global Function untuk Preview Image saat Input File berubah
+window.previewAddImage = (input) => {
+    const file = input.files[0];
+    if (file) {
+        // Validasi Ukuran (Max 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            alert("Ukuran foto terlalu besar! Maksimal 2MB.");
+            input.value = ""; // Reset input
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = document.getElementById('preview-foto-add');
+            const icon = document.getElementById('icon-foto-add');
+            const label = document.getElementById('filename-add');
+            
+            img.src = e.target.result;
+            img.classList.remove('hidden');
+            icon.classList.add('hidden');
+            label.innerText = file.name; // Tampilkan nama file
+        }
+        reader.readAsDataURL(file);
+    }
+};
+
+window.clearAddImage = () => {
+    const input = document.getElementById('file-upload-add');
+    const img = document.getElementById('preview-foto-add');
+    const icon = document.getElementById('icon-foto-add');
+    const label = document.getElementById('filename-add');
+    
+    input.value = "";
+    img.src = "";
+    img.classList.add('hidden');
+    icon.classList.remove('hidden');
+    label.innerText = "Tidak ada berkas dipilih.";
+};
+// ============================================================================
 // Start App
+// ============================================================================
 document.addEventListener("DOMContentLoaded", () => App.init());
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
