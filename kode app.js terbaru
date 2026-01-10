@@ -1,54 +1,94 @@
 // ============================================================================
-// 1. KONFIGURASI & STATE (PUSAT PENYIMPANAN)
+// 1. CONFIGURATION (Data Statis/Tetap)
 // ============================================================================
-
+let logoBase64 = localStorage.getItem('cbt_logo_data') || null;
+let signatureBase64 = localStorage.getItem('cbt_sig_data') || null;
 const CONFIG = {
-    // API Key & URL Supabase
     SUPABASE_URL: 'https://vgemkulcjnpjquabhguv.supabase.co',
-    SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnZW1rdWxjam5wanF1YWJoZ3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4MzUwNTEsImV4cCI6MjA4MDQxMTA1MX0.Z0NxOpNZAhuNlFuR_2h0uRLD8x4gYNpEI9veHNCxKxQ',
+    SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnZW1rdWxjam5wanF1YWJoZ3V2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ4MzUwNTEsImV4cCI6MjA4MDQxMTA1MX0.Z0NxOpNZAhuNlFuR_2h0uRLD8x4gYNpEI9veHNCxKxQ', // Gunakan key lengkap Anda
     
-    // Ticker Text
+    // Peserta Ticker/Running Text
     TICKER_MESSAGES: [
         { text: '<span class="text-yellow-400 font-bold mr-2">[INFO UJIAN]</span> Selamat Datang di Portal Ujian CBT Pro.', anim: 'anim-scroll', duration: 20000 },
         { text: '<span class="text-blue-400 font-bold mr-2">[BANTUAN]</span> Jika terkendala hubungi Admin.', anim: 'anim-center-expand', duration: 10000 }
-    ]
+    ],
+    
+    // Standar Waktu (Default)
+    DEFAULT_TOKEN_DURATION: 15, // dalam menit
 };
-
-// Inisialisasi Supabase
+// Inisialisasi Supabase (Dilakukan sekali di sini)
 const db = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
-
-// State Management Global
+// ============================================================================
+// 2. GLOBAL STATE (Pusat Penyimpanan Sementara/Memori Aplikasi)
+// ============================================================================
 const STATE = {
+    // Status Editing (Untuk membedakan mode Tambah atau Edit)
     editing: {
         classId: null,
         roomId: null,
         examId: null,
-        studentId: null, // <--- TAMBAHAN BARU
+        studentId: null,
         pendingDeleteId: null,
         pendingDeleteType: null
     },
+    
+    // Status UI & Seleksi
     ui: {
         tickerIndex: 0,
-        cardLogo: "https://via.placeholder.com/50",
-        cardSignature: "",
-        selectedStudentIds: []
+        selectedItems: [], // ID siswa yang dicentang di tabel
+        currentPanel: 'dashboard'
     },
+    
+    // Cache Data (Hasil fetch dari Supabase agar tidak query terus-menerus)
     cache: {
         students: [],
         classes: [],
         rooms: [],
         questions: [],
         exams: [],
-        recap: []
+        logs: []
     },
+    
+    // Penyimpanan Interval/Timer agar mudah di-clear
     intervals: {
-        tokenTimer: null
+        tokenTimer: null,
+        clock: null
     },
+    
+    // Saluran Realtime
     realtime: {
         presenceChannel: null 
     }
 };
+// --- HANDLER UNTUK FILE UPLOAD (LOGA & TTD) ---
+const PrintHandler = {
+    handleUpload: function(input, targetKey) {
+        if (input.files && input.files[0]) {
+            const file = input.files[0];
 
+            // Validasi Ukuran (Maks 1MB) agar render tidak lag
+            if (file.size > 1024 * 1024) {
+                alert("Ukuran file terlalu besar! Maksimal 1MB.");
+                input.value = "";
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                // Simpan ke State
+                STATE.print[targetKey] = e.target.result;
+                
+                // Update UI status jika ada (Opsional)
+                const statusEl = document.getElementById(`${targetKey}-status`);
+                if (statusEl) statusEl.innerText = "Terpasang";
+
+                // Render ulang kartu secara Real-Time
+                renderCardPreview();
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+};
 // ============================================================================
 // 2. UTILITIES (ALAT BANTU & KEAMANAN)
 // ============================================================================
@@ -87,7 +127,43 @@ const Utils = {
         return new Date(dateString).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 };
+// ==========================================
+// 3. DATA UTILITY & EXPORT
+// ==========================================
 
+/**
+ * FUNGSI DOWNLOAD TEMPLATE EXCEL
+ * Dipanggil melalui window.downloadTemplateWord agar sinkron dengan HTML
+ */
+function downloadStudentTemplate() {
+    try {
+        // Struktur kolom sesuai kebutuhan database Supabase Anda
+        const headers = [["nama_lengkap", "nisn", "kelas", "jurusan", "username", "password", "ruangan", "sesi"]];
+        const sampleData = [
+            ["Budi Sudarsono", "12345678", "XI", "Farmasi", "budi123", "pass123", "R 03", "1"]
+        ];
+        
+        const data = [...headers, ...sampleData];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Daftar Siswa");
+
+        // Proses download file asli Excel
+        XLSX.writeFile(wb, "Template_Peserta_CBT.xlsx");
+    } catch (error) {
+        console.error("Gagal mendownload template:", error);
+        alert("Terjadi kesalahan: Pastikan library XLSX sudah terpasang.");
+    }
+}
+
+// BRIDGE: Menghubungkan klik tombol di HTML ke fungsi di atas
+window.downloadTemplateWord = function(type) {
+    if (type === 'student') {
+        downloadStudentTemplate();
+    } else {
+        alert("Template untuk " + type + " belum tersedia.");
+    }
+};
 // ============================================================================
 // 3. SERVICE LAYER (DATABASE)
 // ============================================================================
@@ -110,19 +186,89 @@ const DB = {
     },
 
     // --- DATA UTAMA (KELAS, RUANG, UJIAN) ---
-    async getClasses() {
-        const { data } = await db.from('classes').select('*');
-        return (data || []).map(c => ({ id: c.id, code: c.kode_kelas, name: c.nama_kelas, desc: c.deskripsi, count: 0, date: 'Terdaftar' }));
+   async getClasses() {
+        // 1. Ambil daftar kelas
+        const { data: classesData, error: errClass } = await db.from('classes').select('*');
+        if (errClass) return [];
+
+        // 2. Ambil data siswa (hanya kolom 'kelas' untuk menghitung jumlah)
+        const { data: studentsData, error: errStu } = await db.from('students').select('kelas');
+        
+        // 3. Hitung jumlah siswa per kelas
+        // Hasilnya misal: { "XII IPA 1": 25, "XII IPS 1": 30 }
+        const counts = {};
+        if (studentsData) {
+            studentsData.forEach(s => {
+                // Pastikan nama kelas persis sama (case sensitive)
+                const k = s.kelas || 'Unassigned';
+                counts[k] = (counts[k] || 0) + 1;
+            });
+        }
+
+        // 4. Map data kelas dengan jumlah yang sudah dihitung
+        return (classesData || []).map(c => ({
+            id: c.id,
+            code: c.kode_kelas,
+            name: c.nama_kelas,
+            desc: c.deskripsi || '-',
+            // Ambil jumlah dari object counts, jika tidak ada set 0
+            count: counts[c.nama_kelas] || 0, 
+            date: Utils.formatDate(c.created_at) || 'Terdaftar'
+        }));
     },
     async getRooms() {
-        const { data } = await db.from('rooms').select('*');
-        return (data || []).map(r => ({ id: r.id, code: r.kode_ruangan, name: r.nama_ruangan, desc: r.deskripsi, count: 0, date: 'Terdaftar' }));
+        // 1. Ambil daftar ruangan
+        const { data: roomsData, error: errRoom } = await db.from('rooms').select('*');
+        if (errRoom) return [];
+
+        // 2. Ambil data siswa (hanya kolom 'ruangan')
+        const { data: studentsData, error: errStu } = await db.from('students').select('ruangan');
+
+        // 3. Hitung jumlah siswa per ruangan
+        const counts = {};
+        if (studentsData) {
+            studentsData.forEach(s => {
+                const r = s.ruangan || 'Unassigned';
+                counts[r] = (counts[r] || 0) + 1;
+            });
+        }
+
+        // 4. Map data ruangan dengan jumlah yang sudah dihitung
+        return (roomsData || []).map(r => ({
+            id: r.id,
+            code: r.kode_ruangan,
+            name: r.nama_ruangan,
+            desc: r.deskripsi || '-',
+            // Ambil jumlah dari object counts, jika tidak ada set 0
+            count: counts[r.nama_ruangan] || 0,
+            date: Utils.formatDate(r.created_at) || 'Terdaftar'
+        }));
     },
-    async getExams() {
-        const { data } = await db.from('exams').select('*').order('created_at', { ascending: false });
-        return (data || []).map(e => ({
-            id: e.id, name: e.nama_ujian, status: e.status, alokasi: e.alokasi,
-            peserta: e.peserta || 0, pengelola: e.pengelola || 'Admin'
+   async getExams() {
+       // --- PERBAIKAN ---
+        const { data, error } = await db
+            .from('exams')
+            // Pastikan kolom ini sesuai dengan nama kolom di database Anda
+            .select('id, nama_ujian, status, alokasi, peserta, pengelola, acak_paket, acak_soal, acak_opsi, tampil_nilai')
+            .order('created_at', { ascending: false });
+            
+        if (error) { 
+            console.error("Gagal ambil ujian:", error.message); 
+            return []; 
+        }
+        
+        // Mapping data dari Database ke Format Aplikasi
+        return data.map(e => ({
+            id: e.id,
+            name: e.nama_ujian,       // Pastikan kolom DB: nama_ujian
+            status: e.status,         // Pastikan kolom DB: status
+            alokasi: e.alokasi,       // Pastikan kolom DB: alokasi
+            peserta: e.peserta || 0,  // Pastikan kolom DB: peserta
+            pengelola: e.pengelola || 'Admin',
+            acakPaket: e.acak_paket || 'first',   // Default 'first'
+            acakSoal: e.acak_soal || 'no',        // Default 'no'
+            acakOpsi: e.acak_opsi || 'no',        // Default 'no'
+            tampilNilai: e.tampil_nilai || 'hide' // Default 'hide'
         }));
     },
     async getQuestions() {
@@ -191,16 +337,8 @@ const DB = {
         const { data } = await db.from('exam_settings').select('*').eq('id', 1).single();
         return data;
     },
-
-    // --- BULK ACTIONS (EKSEKUSI MASSAL) ---
-    async bulkUpdateStudents(filterCol, filterValues, updateData) {
-        const { error } = await db.from('students').update(updateData).in(filterCol, filterValues);
-        return { error };
-    },
     // 1. Update Data Massal (Untuk Kelas, Ruangan, Sesi, Password)
     async bulkUpdateStudents(ids, updateData) {
-        // ids: Array ID Peserta ['1001', '1002']
-        // updateData: Object { kelas: 'XII IPA 1' }
         const { data, error } = await db
             .from('students')
             .update(updateData)
@@ -247,18 +385,20 @@ const DB = {
     
     // CRUD Create/Update/Delete lainnya tetap sama...
     async addStudent(d) { return await db.from('students').insert([d]); },
-    async addClass(d) { return await db.from('classes').insert([d]); },
-    async updateClass(id, d) { return await db.from('classes').update(d).eq('id', id); },
+    async addClass(d) { return await db.from('classes').insert([d]).select(); },
+    async updateClass(id, d) { return await db.from('classes').update(d).eq('id', id).select(); },
     async deleteClass(id) { return await db.from('classes').delete().eq('id', id); },
-    async addRoom(d) { return await db.from('rooms').insert([d]); },
-    async updateRoom(id, d) { return await db.from('rooms').update(d).eq('id', id); },
+    async addRoom(d) { return await db.from('rooms').insert([d]).select(); },
+    async updateRoom(id, d) { return await db.from('rooms').update(d).eq('id', id).select(); },
     async deleteRoom(id) { return await db.from('rooms').delete().eq('id', id); },
     async addExam(d) { return await db.from('exams').insert([d]); },
     async updateExam(id, d) { return await db.from('exams').update(d).eq('id', id); },
     async deleteExam(id) { return await db.from('exams').delete().eq('id', id); },
     async addQuestion(d) { return await db.from('questions').insert([d]); },
     
-    async incrementHit() { await db.rpc('increment_hit'); },
+    async incrementHit() {
+        try { await db.rpc('increment_hit'); } catch (e) { console.warn("RPC increment_hit tidak ditemukan."); }
+    },
     async logDevice() { /* Kode logDevice tetap sama */ },
     async getDeviceLogs() { const { data } = await db.from('device_logs').select('*').order('last_seen', { ascending: false }).limit(50); return data || []; }
 };
@@ -276,7 +416,7 @@ const Auth = {
         }
     },
 
-    async login(userIdID, passID, btnID) {
+async login(userIdID, passID, btnID) {
         const userInput = Utils.getEl(userIdID);
         const passInput = Utils.getEl(passID);
         const btn = Utils.getEl(btnID);
@@ -289,7 +429,8 @@ const Auth = {
             return;
         }
 
-        Utils.setLoading(btn, true, "Checking...");
+        // 1. Mulai Loading (Tombol Berputar)
+        Utils.setLoading(btn, true, "Memverifikasi...");
 
         try {
             const { data, error } = await db
@@ -297,38 +438,52 @@ const Auth = {
                 .eq('username', userVal).eq('password', passVal)
                 .single();
 
-            if (error || !data) throw new Error("Username/Password Salah");
+            if (error || !data) throw new Error("Username atau Password Salah");
 
+            // --- JIKA BERHASIL ---
             const session = { id: data.id, username: data.username, role: data.role };
             localStorage.setItem('cbt_user_session', JSON.stringify(session));
             
+            // Update status login di background (tanpa await agar cepat)
             db.from('users').update({ status_login: true }).eq('id', data.id).then();
 
+            // Sembunyikan Modal PIN jika ada (Login Admin)
             const pinModal = Utils.getEl('modal-pin');
             if(pinModal) pinModal.classList.add('hidden');
 
-            View.modals.showSuccess("Berhasil masuk!");
+            // 2. Tampilkan Pop-up Sukses
+            View.modals.showSuccess("Login Berhasil! Mengalihkan...");
 
+            // 3. Init Dashboard di background
             if (window.supabase) {
                 RealtimeFeatures.initPresence(); 
                 View.updateDashboard(); 
             }
 
+            // 4. TUNDA PERPINDAHAN HALAMAN (2 Detik)
+            // Biarkan tombol tetap loading & pop-up tetap muncul
             setTimeout(() => {
-                View.modals.closeSuccess();
-                this.setSessionUI(); 
-            }, 800); 
+                View.modals.closeSuccess(); // Tutup pop-up
+                this.setSessionUI();        // Pindah ke Dashboard
+                // Note: Kita TIDAK mematikan loading tombol disini, 
+                // karena halaman login akan hilang/tertutup dashboard.
+            }, 1500); 
 
         } catch (err) {
-            View.modals.showError("Gagal Masuk", "Username atau Password salah.");
+            // --- JIKA GAGAL ---
+            // Baru kita matikan loadingnya agar user bisa coba lagi
             Utils.setLoading(btn, false, "Masuk");
-        } finally {
-            if (!localStorage.getItem('cbt_user_session')) {
-                Utils.setLoading(btn, false, "Masuk");
-            }
-            if(passInput) passInput.value = '';
-        }
+            View.modals.showError("Gagal Masuk", "Username atau Password salah.");
+        } 
+        // HAPUS blok 'finally' agar loading tidak mati saat sukses
     },
+        //} finally {
+           // if (!localStorage.getItem('cbt_user_session')) {
+               // Utils.setLoading(btn, false, "Masuk");
+            //}
+           // if(passInput) passInput.value = '';
+       // }
+   // },
 
     logout() {
         const session = JSON.parse(localStorage.getItem('cbt_user_session'));
@@ -404,7 +559,18 @@ const View = {
             this.populateFilters(); // Isi filter Kelas/Ruangan di atas tabel
             this.renderStudents(false);
         }
-        
+        if (panelId === 'exam-participants') {
+            // Logika khusus saat masuk halaman peserta ujian
+            // Contoh: Scroll ke atas otomatis
+            const container = Utils.getEl('view-exam-participants');
+            if(container) container.scrollTop = 0;
+        }
+
+        if (panelId === 'recap') {
+            // Logika khusus saat masuk halaman rekap
+            const container = Utils.getEl('view-recap');
+            if(container) container.scrollTop = 0;
+        }
         // C. Kelas & Ruangan
         if (panelId === 'classes') this.renderClasses();
         if (panelId === 'rooms') this.renderRooms();
@@ -425,10 +591,47 @@ const View = {
         }
 
         // 5. Reset Seleksi (Agar tombol 'Terseleksi' kembali ke 0 saat pindah menu)
-        this.selectedItems = [];
-        this.updateBulkButtonUI();
+       // Reset seleksi HANYA JIKA bukan pindah ke halaman cetak
+        if (panelId !== 'card-print') { 
+            this.selectedItems = [];
+            this.updateBulkButtonUI();
+        }
     },
-
+    // --- FUNGSI PENCARIAN UNIVERSAL ---
+    searchTimer: null,
+    
+    searchData(type, keyword) {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => {
+            keyword = keyword.toLowerCase();
+            
+            if (type === 'students') {
+                const filtered = STATE.cache.students.filter(s => 
+                    // Tambahkan String(...) untuk mencegah error pada data angka
+                    String(s.nama_lengkap || s.nama || '').toLowerCase().includes(keyword) ||
+                    String(s.id_peserta || '').toLowerCase().includes(keyword) ||
+                    String(s.username || '').toLowerCase().includes(keyword)
+                );
+                this.renderStudents(false, filtered); 
+            }
+            else if (type === 'classes') {
+                // Filter Data Kelas
+                const filtered = STATE.cache.classes.filter(c => 
+                    (c.name || '').toLowerCase().includes(keyword) ||
+                    (c.code || '').toLowerCase().includes(keyword)
+                );
+                this.renderClasses(filtered);
+            }
+            else if (type === 'rooms') {
+                // Filter Data Ruangan
+                const filtered = STATE.cache.rooms.filter(r => 
+                    (r.name || '').toLowerCase().includes(keyword) ||
+                    (r.code || '').toLowerCase().includes(keyword)
+                );
+                this.renderRooms(filtered);
+            }
+        }, 300); // Delay 300ms agar tidak berat
+    },
     toggleSidebar() {
         const sidebar = Utils.getEl('sidebar');
         const overlay = Utils.getEl('sidebar-overlay');
@@ -448,16 +651,25 @@ const View = {
         this.updateBulkButtonUI(); 
     },
 
-    toggleSelectAll(source, dataCache, keyName = 'name') {
+toggleSelectAll(source) {
+        // 1. Ambil semua checkbox baris yang sedang tampil di layar
         const checkboxes = document.querySelectorAll('.row-checkbox');
+        
+        // 2. Samakan status centang mereka dengan header
         checkboxes.forEach(cb => cb.checked = source.checked);
         
         if (source.checked) {
-            this.selectedItems = dataCache.map(item => item[keyName]); 
+            // 3. JIKA DICENTANG: Ambil value (ID) dari checkbox tersebut
+            // Kita pakai Set untuk menghindari duplikat
+            const newIds = Array.from(checkboxes).map(cb => cb.value);
+            this.selectedItems = [...new Set(newIds)];
         } else {
+            // 4. JIKA DI-UNCHECK: Kosongkan seleksi
             this.selectedItems = [];
         }
-        this.updateBulkButtonUI(); 
+
+        // 5. Update tampilan tombol aksi
+        this.updateBulkButtonUI();
     },
 
     updateBulkButtonUI() {
@@ -554,29 +766,42 @@ const View = {
     },
 
     // --- RENDER TABEL & LIST ---
-    async renderStudents(useCache = false) {
-        if(!useCache) { this.selectedItems = []; this.updateBulkButtonUI(); }
+async renderStudents(useCache = false, customData = null) {
+        // 1. Reset Seleksi jika bukan refresh cache dan bukan pencarian
+        if(!useCache && !customData) { 
+            this.selectedItems = []; 
+            this.updateBulkButtonUI(); 
+        }
 
         const tbody = Utils.getEl('table-students-body');
-        if (!useCache || STATE.cache.students.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8"><span class="animate-spin">⏳</span> Memuat...</td></tr>`;
-            STATE.cache.students = await DB.getStudents();
+        
+        // 2. Tentukan Data: Pakai Custom (Search) atau Cache/DB
+        let dataToRender = customData;
+
+        if (!dataToRender) {
+            // Jika tidak ada custom data (bukan sedang mencari)
+            if (!useCache || STATE.cache.students.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="13" class="text-center py-8"><span class="animate-spin text-blue-500">⏳</span> Memuat data...</td></tr>`;
+                STATE.cache.students = await DB.getStudents();
+            }
+            dataToRender = STATE.cache.students;
         }
 
         const filterClass = Utils.getEl('filter-class')?.value || 'Semua';
         const filterRoom = Utils.getEl('filter-room')?.value || 'Semua';
 
-        const html = STATE.cache.students.map((s, i) => {
-            // Filter Logika
-            if (filterClass !== 'Semua' && s.kelas !== filterClass) return '';
-            if (filterRoom !== 'Semua' && s.ruangan !== filterRoom) return '';
+        // 3. Render HTML (Looping pada dataToRender)
+        const html = dataToRender.map((s, i) => {
+            // Filter Dropdown (Hanya berlaku jika bukan sedang search)
+            if (!customData) { 
+                if (filterClass !== 'Semua' && s.kelas !== filterClass) return '';
+                if (filterRoom !== 'Semua' && s.ruangan !== filterRoom) return '';
+            }
 
-            // --- DATA PENTING (JANGAN SALAH AMBIL) ---
-            const internalId = s.id; // ID Database (Untuk Checkbox/Hapus)
-            const nisn = s.id_peserta || '-'; // ID Peserta/NISN (Untuk Tampilan)
-            
-            // Handle variasi nama kolom database
-            const namaSiswa = s.nama_lengkap || s.nama || '-'; 
+            // --- DATA PENTING ---
+            const internalId = s.id; 
+            const nisn = s.id_peserta || '-';
+            const namaSiswa = s.nama_lengkap || s.nama || '-';
             const passSiswa = s.password || s.pass || '';
             const username = s.username || '-';
             const kelas = s.kelas || '-';
@@ -586,17 +811,8 @@ const View = {
             // --- HTML PASSWORD MODERN ---
             const passwordHtml = `
                 <div class="relative flex items-center justify-center group/pass w-28 mx-auto">
-                    <input type="password" 
-                           value="${Utils.escapeHTML(passSiswa)}" 
-                           id="pass-input-${i}" 
-                           readonly
-                           class="w-full text-center bg-transparent border-none outline-none font-mono text-xs tracking-widest text-slate-600 cursor-default focus:ring-0 px-0">
-                    
-                    <button onclick="View.togglePass(${i})" 
-                            class="absolute -right-2 p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all opacity-0 group-hover/pass:opacity-100 focus:opacity-100"
-                            title="Lihat Password">
-                        <i data-feather="eye" id="icon-pass-${i}" class="w-3.5 h-3.5 transition-transform"></i>
-                    </button>
+                    <input type="password" value="${Utils.escapeHTML(passSiswa)}" id="pass-input-${i}" readonly class="w-full text-center bg-transparent border-none outline-none font-mono text-xs tracking-widest text-slate-600 cursor-default px-0">
+                    <button onclick="View.togglePass(${i})" class="absolute -right-2 p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-all opacity-0 group-hover/pass:opacity-100 focus:opacity-100"><i data-feather="eye" id="icon-pass-${i}" class="w-3.5 h-3.5"></i></button>
                 </div>`;
 
             // --- HTML ROW ---
@@ -604,136 +820,195 @@ const View = {
             <tr class="border-b hover:bg-slate-50 transition group-row">
                 <td class="px-4 py-3 text-center w-10">
                     <input type="checkbox" class="row-checkbox w-3.5 h-3.5 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
-                        value="${internalId}"
-                        ${View.selectedItems.includes(String(internalId)) ? 'checked' : ''}
+                        value="${internalId}" 
+                        ${View.selectedItems.includes(String(internalId)) ? 'checked' : ''} 
                         onclick="View.toggleSelect('${internalId}', this.checked)">
                 </td>
-
                 <td class="px-2 py-3 text-center relative w-12">
-                    <button onclick="toggleActionDropdown('stu-${i}', event)" class="bg-blue-50 p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors">
-                        <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
-                    </button>
+                    <button onclick="toggleActionDropdown('stu-${i}', event)" class="bg-blue-50 p-1.5 rounded-lg hover:bg-blue-100 text-blue-600 transition-colors"><i data-feather="more-horizontal" class="w-3.5 h-3.5"></i></button>
                     <div id="dropdown-stu-${i}" class="action-dropdown text-left z-50 hidden absolute left-0 mt-1 w-32 bg-white rounded-lg shadow-lg border border-slate-100 py-1">
                         <button onclick="StudentController.prepareEdit('${internalId}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-600 font-medium">Edit Data</button>
                         <button onclick="View.modals.confirmDelete('${internalId}', 'student')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600 font-medium">Hapus</button>
                     </div>
                 </td>
-
                 <td class="px-4 py-3 text-center text-[10px] text-slate-400 font-medium w-10">${i + 1}</td>
-
                 <td class="px-4 py-3 font-mono text-xs text-slate-600 font-medium">${Utils.escapeHTML(username)}</td>
-                
                 <td class="px-2 py-3 text-center">${passwordHtml}</td>
-                
                 <td class="px-4 py-3 font-bold text-xs uppercase text-slate-700 min-w-[150px]">${Utils.escapeHTML(namaSiswa)}</td>
-                
                 <td class="px-4 py-3 text-xs font-mono text-slate-500">${Utils.escapeHTML(nisn)}</td>
-                
                 <td class="px-4 py-3"><span class="bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-md text-[10px] font-bold border border-indigo-100">${Utils.escapeHTML(kelas)}</span></td>
-                
                 <td class="px-4 py-3 text-xs text-slate-600">${Utils.escapeHTML(ruangan)}</td>
-                
                 <td class="px-4 py-3 text-center"><span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] font-bold border border-slate-200">${Utils.escapeHTML(sesi)}</span></td>
-                
                 <td class="px-4 py-3 text-xs text-slate-500">${Utils.escapeHTML(s.sekolah || '-')}</td>
-                
                 <td class="px-4 py-3 text-xs text-slate-500">${Utils.escapeHTML(s.agama || '-')}</td>
-                
                 <td class="px-4 py-3 text-xs italic text-slate-400 truncate max-w-[100px]" title="${Utils.escapeHTML(s.catatan)}">${Utils.escapeHTML(s.catatan || '-')}</td>
             </tr>`;
         }).join('');
         
-        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-8 text-xs text-slate-400 italic">Data peserta tidak ditemukan.</td></tr>`;
+        tbody.innerHTML = html || `<tr><td colspan="13" class="text-center py-8 text-xs text-slate-400 italic">Data tidak ditemukan.</td></tr>`;
         if (typeof feather !== 'undefined') feather.replace();
     },
 
-    async renderClasses() {
+    async renderClasses(customData = null) {
+        // 1. Reset seleksi
         this.selectedItems = []; 
         this.updateBulkButtonUI();
         const tbody = Utils.getEl('table-classes-body');
-        STATE.cache.classes = await DB.getClasses();
         
-        const html = STATE.cache.classes.map((item, i) => `
+        // 2. LOGIKA DATA: Gunakan data pencarian (jika ada) atau ambil dari DB
+        let data = customData;
+        if (!data) {
+            // Jika bukan mode cari, ambil data terbaru dari database
+            STATE.cache.classes = await DB.getClasses();
+            data = STATE.cache.classes;
+        }
+
+        // 3. Render variabel 'data' (bukan STATE.cache.classes secara langsung)
+        const html = data.map((item, i) => `
             <tr class="border-b hover:bg-slate-50 transition">
                 <td class="px-4 py-3 text-center">
                     <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
-                        onchange="View.toggleSelect('${Utils.escapeHTML(item.name)}', this.checked)">
+                        onchange="View.toggleSelect('${Utils.escapeHTML(item.id)}', this.checked)">
                 </td>
                 <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
                 <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
                 <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
                 <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
+                
                 <td class="px-4 py-3">
                     <button onclick="View.navToStudentFilter('kelas', '${Utils.escapeHTML(item.name)}')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
                         <i data-feather="users" class="w-3 h-3"></i> (${item.count || 0}) Peserta
                     </button>
                 </td>
+                
                 <td class="px-4 py-3 text-[10px]">${item.date}</td>
+                
                 <td class="px-4 py-3 text-center relative">
                     <button onclick="toggleActionDropdown('cls-${i}', event)" class="bg-slate-100 p-1.5 rounded hover:bg-slate-200 text-slate-600">
                         <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
                     </button>
-                    <div id="dropdown-cls-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right">
+                    <div id="dropdown-cls-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right hidden absolute bg-white shadow-lg border rounded p-1">
                         <button onclick="View.modals.openEditClass('${item.id}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600">Edit</button>
                         <button onclick="View.modals.confirmDelete('${item.id}', 'class')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
                     </div>
                 </td>
             </tr>`).join('');
-        tbody.innerHTML = html;
+
+        // Tampilkan pesan jika data kosong
+        tbody.innerHTML = html || '<tr><td colspan="8" class="text-center py-8 text-xs text-slate-400">Data tidak ditemukan.</td></tr>';
+        
         if (typeof feather !== 'undefined') feather.replace();
     },
 
-    async renderRooms() {
+    async renderRooms(customData = null) {
+        // 1. Reset Seleksi
         this.selectedItems = [];
         this.updateBulkButtonUI();
         const tbody = Utils.getEl('table-rooms-body');
-        STATE.cache.rooms = await DB.getRooms();
         
-        const html = STATE.cache.rooms.map((item, i) => `
+        // 2. LOGIKA DATA: Gunakan data pencarian (jika ada) atau ambil dari DB
+        let data = customData;
+        if (!data) {
+            // Jika bukan mode cari, ambil data terbaru dari database
+            STATE.cache.rooms = await DB.getRooms();
+            data = STATE.cache.rooms;
+        }
+
+        // 3. Render variabel 'data'
+        const html = data.map((item, i) => `
             <tr class="border-b hover:bg-slate-50 transition">
                 <td class="px-4 py-3 text-center">
                     <input type="checkbox" class="row-checkbox w-3.5 h-3.5" 
-                        onchange="View.toggleSelect('${Utils.escapeHTML(item.name)}', this.checked)">
+                        onchange="View.toggleSelect('${Utils.escapeHTML(item.id)}', this.checked)">
                 </td>
                 <td class="px-4 py-3 text-center text-xs">${i + 1}</td>
                 <td class="px-4 py-3 font-mono font-bold text-xs">${Utils.escapeHTML(item.code)}</td>
                 <td class="px-4 py-3 font-bold text-xs uppercase">${Utils.escapeHTML(item.name)}</td>
                 <td class="px-4 py-3 text-xs italic">${Utils.escapeHTML(item.desc)}</td>
+                
                 <td class="px-4 py-3">
                      <button onclick="View.navToStudentFilter('ruangan', '${Utils.escapeHTML(item.name)}')" class="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
                         <i data-feather="users" class="w-3 h-3"></i> (${item.count || 0}) Peserta
                     </button>
                 </td>
+                
                 <td class="px-4 py-3 text-[10px]">${item.date}</td>
+                
                 <td class="px-4 py-3 text-center relative">
                      <button onclick="toggleActionDropdown('room-${i}', event)" class="bg-slate-100 p-1.5 rounded hover:bg-slate-200 text-slate-600">
                         <i data-feather="more-horizontal" class="w-3.5 h-3.5"></i>
                     </button>
-                    <div id="dropdown-room-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right">
+                    <div id="dropdown-room-${i}" class="action-dropdown text-left z-50 right-0 origin-top-right hidden absolute bg-white shadow-lg border rounded p-1">
                         <button onclick="View.modals.openEditRoom('${item.id}')" class="block w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-blue-600">Edit</button>
                         <button onclick="View.modals.confirmDelete('${item.id}', 'room')" class="block w-full text-left px-4 py-2 text-xs hover:bg-red-50 text-red-600">Hapus</button>
                     </div>
                 </td>
             </tr>`).join('');
-        tbody.innerHTML = html;
+            
+        // Tampilkan pesan jika data kosong
+        tbody.innerHTML = html || '<tr><td colspan="8" class="text-center py-4 text-xs text-slate-400">Data tidak ditemukan.</td></tr>';
+        
         if (typeof feather !== 'undefined') feather.replace();
     },
-
     // --- NAVIGASI FILTER & LAINNYA ---
-    navToStudentFilter(type, value) { 
-        this.nav('students');
-        setTimeout(() => {
-            if(type === 'kelas') {
-                const select = Utils.getEl('filter-class');
-                if(select) { select.value = value; select.dispatchEvent(new Event('change')); }
-            } else if (type === 'ruangan') {
-                const select = Utils.getEl('filter-room');
-                if(select) { select.value = value; select.dispatchEvent(new Event('change')); }
-            }
-            this.renderStudents(true); 
-        }, 100); 
-    }, 
+    async navToStudentFilter(type, value) { 
+    // 1. Pindah panel terlebih dahulu
+    this.nav('students');
 
+    // 2. Pastikan data cache tersedia. Jika kosong, ambil dari DB
+    if (!STATE.cache.students || STATE.cache.students.length === 0) {
+        STATE.cache.students = await DB.getStudents();
+    }
+
+    // 3. Gunakan requestAnimationFrame untuk memastikan DOM 'filter' sudah dirender
+    requestAnimationFrame(() => {
+        const filterId = (type === 'kelas') ? 'filter-class' : 'filter-room';
+        const selectEl = Utils.getEl(filterId);
+        
+        if (selectEl) {
+            selectEl.value = value;
+            // Trigger event change manual agar UI tersinkronisasi
+            selectEl.dispatchEvent(new Event('change'));
+            // Render ulang tabel berdasarkan filter yang baru diset
+            this.renderStudents(true); 
+        }
+    });
+},
+   // PERBAIKAN: Menghapus kata 'function' agar sesuai format objek
+    updateCardLogo(input) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                logoBase64 = e.target.result;
+                renderCardPreview(); // Render ulang otomatis
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }, // Tambahkan koma di sini
+    
+    updateCardSignature(input) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                signatureBase64 = e.target.result;
+                renderCardPreview(); // Render ulang otomatis
+            };
+            reader.readAsDataURL(input.files[0]);
+        }
+    }, // Tambahkan koma di sini
+
+    downloadStudentTemplate() {
+        const headers = [["Nama Lengkap", "NISN", "Kelas", "Jurusan", "Username", "Password"]];
+        const data = [
+            ...headers,
+            ["Budi Sudarsono", "12345678", "XI", "Farmasi", "budi123", "pass123"]
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Template Siswa");
+        XLSX.writeFile(wb, "Template_Peserta_CBT.xlsx");
+    },
         togglePass(index) {
         // 1. Ambil elemen input dan tombol
         const inputEl = Utils.getEl(`pass-input-${index}`);
@@ -822,41 +1097,85 @@ const View = {
             if (btn) btn.classList.remove('bg-slate-100', 'text-blue-600');
         }
     },
-
-    async renderExamList() {
-        const container = Utils.getEl('exam-list-body');
+    async renderExamList() { // Pastikan async jika ada await di dalamnya
+        const container = Utils.getEl('exam-list-body'); // [PENTING] Definisikan container
         if (!container) return;
+
         container.innerHTML = `<tr><td colspan="8" class="text-center py-8">⏳ Memuat...</td></tr>`;
-        STATE.cache.exams = await DB.getExams();
         
+        // Pastikan data diambil dari DB jika cache kosong
+        if (!STATE.cache.exams || STATE.cache.exams.length === 0) {
+             STATE.cache.exams = await DB.getExams();
+        }
+
         const html = STATE.cache.exams.map((ex, i) => {
             const statusClass = ex.status === 'Aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500';
+            
             return `
             <tr class="border-b hover:bg-slate-50 transition-colors">
                 <td class="w-24 text-center py-3 relative">
                     <div class="inline-flex rounded-md shadow-sm">
-                        <button onclick="View.openExamDetail('${Utils.escapeHTML(ex.name)}')" class="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-l-lg">Detail</button>
-                        <button onclick="toggleActionDropdown('exam-${i}', event)" class="px-2 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-r-lg border-l border-blue-700"><i data-feather="chevron-down" class="w-3 h-3"></i></button>
+                        <button onclick="View.openExamDetail('${Utils.escapeHTML(ex.name)}')" class="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-l-lg hover:bg-blue-700">Detail</button>
+                        <button onclick="toggleActionDropdown('exam-${i}', event)" class="px-2 py-1.5 text-xs font-bold text-white bg-blue-600 rounded-r-lg border-l border-blue-700 hover:bg-blue-700"><i data-feather="chevron-down" class="w-3 h-3"></i></button>
                     </div>
-                    <div id="dropdown-exam-${i}" class="action-dropdown text-left z-50">
-                        <button onclick="View.openExamSettings('${Utils.escapeHTML(ex.name)}', ${ex.id})" class="block w-full text-left px-4 py-1.5 hover:bg-slate-50">Pengaturan</button>
-                        <button onclick="ExamController.toggleStatus(${i})" class="block w-full text-left px-4 py-1.5 font-bold">${ex.status === 'Aktif' ? 'Nonaktifkan' : 'Aktifkan'}</button>
-                        <button onclick="ExamController.delete(${i})" class="block w-full text-left px-4 py-1.5 hover:bg-red-50 text-red-500">Hapus</button>
+                    
+                    <div id="dropdown-exam-${i}" class="action-dropdown text-left z-50 hidden absolute left-0 mt-1 w-48 bg-white border border-slate-200 shadow-xl rounded-lg overflow-hidden ring-1 ring-black ring-opacity-5">
+                        
+                        <div class="px-4 py-2 border-b border-slate-100 bg-slate-50">
+                            <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Aksi Ujian</span>
+                        </div>
+
+                        <button onclick="ExamController.openParticipants('${ex.id}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2">
+                            <i data-feather="users" class="w-3.5 h-3.5 text-blue-500"></i> Daftar Peserta
+                        </button>
+                        
+                        <button onclick="ExamController.openRecap('${ex.id}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2 border-b border-slate-50">
+                            <i data-feather="bar-chart-2" class="w-3.5 h-3.5 text-orange-500"></i> Rekap Pengerjaan
+                        </button>
+
+                        <button onclick="alert('Fitur Pengelola File Segera Hadir')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2">
+                            <i data-feather="folder" class="w-3.5 h-3.5 text-yellow-500"></i> Pengelola File
+                        </button>
+
+                        <button onclick="View.openExamSettings('${Utils.escapeHTML(ex.name)}', '${ex.id}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2 border-b border-slate-50">
+                            <i data-feather="settings" class="w-3.5 h-3.5 text-slate-500"></i> Pengaturan
+                        </button>
+
+                        <button onclick="ExamController.toggleStatus('${ex.id}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2">
+                            <i data-feather="${ex.status === 'Aktif' ? 'toggle-right' : 'toggle-left'}" class="w-3.5 h-3.5 ${ex.status === 'Aktif' ? 'text-green-500' : 'text-slate-400'}"></i> 
+                            ${ex.status === 'Aktif' ? 'Matikan Ujian' : 'Aktifkan Ujian'}
+                        </button>
+
+                        <button onclick="alert('Ujian diarsipkan')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2 border-b border-slate-50">
+                            <i data-feather="archive" class="w-3.5 h-3.5 text-purple-500"></i> Arsipkan Ujian
+                        </button>
+
+                        <button onclick="ExamController.exportExam('${ex.id}')" class="w-full text-left px-4 py-2.5 hover:bg-slate-50 text-slate-700 text-xs font-medium flex items-center gap-2">
+                            <i data-feather="download" class="w-3.5 h-3.5 text-cyan-500"></i> Export Ujian
+                        </button>
+
+                        <button onclick="ExamController.delete('${ex.id}')" class="w-full text-left px-4 py-2.5 hover:bg-red-50 text-red-600 text-xs font-bold flex items-center gap-2">
+                            <i data-feather="trash-2" class="w-3.5 h-3.5"></i> Hapus Ujian
+                        </button>
                     </div>
                 </td>
+                
                 <td class="py-3 px-4 font-bold text-xs uppercase">${Utils.escapeHTML(ex.name)}</td>
-                <td class="py-3 px-4 text-xs">(${ex.peserta}) Peserta</td>
+                <td class="py-3 px-4 text-xs">(${ex.peserta || 0}) Peserta</td>
                 <td class="py-3 px-4 text-xs">${Utils.escapeHTML(ex.pengelola)}</td>
                 <td class="py-3 px-4 font-mono font-bold text-xs">${Utils.escapeHTML(ex.alokasi)}</td>
                 <td class="py-3 px-4"><span class="${statusClass} px-2 py-1 rounded text-[10px] font-bold uppercase">${ex.status}</span></td>
                 <td class="py-3 px-4 text-xs">-</td>
                 <td class="py-3 px-4 text-xs">-</td>
-            </tr>`;
+            </tr>`; 
         }).join('');
-        container.innerHTML = html || `<tr><td colspan="8" class="text-center py-4">Belum ada ujian.</td></tr>`;
-        if (typeof feather !== 'undefined') feather.replace();
-    },
 
+        // [PENTING] Masukkan HTML ke Container
+        container.innerHTML = html || `<tr><td colspan="8" class="text-center py-4">Belum ada ujian.</td></tr>`;
+        
+        // Refresh ikon
+        if (typeof feather !== 'undefined') feather.replace();
+    }, 
     async renderQuestions() {
         const tbody = Utils.getEl('question-list-body');
         if (!tbody) return;
@@ -950,8 +1269,8 @@ const View = {
             Utils.getEl('modal-class-title').innerText = id ? "Edit Data Kelas" : "Tambah Kelas Baru";
             Utils.getEl('modal-edit-class').classList.remove('hidden');
         },
-        closeEditClass() { Utils.getEl('modal-edit-class').classList.add('hidden'); STATE.editing.classId = null; },
-        
+        closeEditClass() { Utils.getEl('modal-edit-class').classList.add('hidden'); STATE.editing.classId = null; Utils.getEl('edit-class-name').value = ''; Utils.getEl('edit-class-desc').value = ''; },
+       
         openEditRoom(id = null) {
             STATE.editing.roomId = id;
             const target = STATE.cache.rooms.find(r => String(r.id) === String(id));
@@ -960,7 +1279,7 @@ const View = {
             Utils.getEl('modal-room-title').innerText = id ? "Edit Ruangan" : "Tambah Ruangan";
             Utils.getEl('modal-edit-room').classList.remove('hidden');
         },
-        closeEditRoom() { Utils.getEl('modal-edit-room').classList.add('hidden'); STATE.editing.roomId = null; },
+        closeEditRoom() { Utils.getEl('modal-edit-room').classList.add('hidden'); STATE.editing.roomId = null; Utils.getEl('edit-class-name').value = ''; Utils.getEl('edit-class-desc').value = ''; },
 
         confirmDelete(id, type) {
             STATE.editing.pendingDeleteId = id;
@@ -968,46 +1287,45 @@ const View = {
             Utils.getEl('modal-confirm-delete').classList.remove('hidden');
         },
 
-showSuccess(msg) {
-            const m = Utils.getEl('modal-success');
-            if(!m) return;
+        // --- LOGIKA POP-UP YANG SUDAH DIPERBAIKI ---
+        showSuccess(msg) {
+            // 1. Ambil elemen berdasarkan ID yang baru kita buat
+            const m = document.getElementById('modal-success');
+            const backdrop = document.getElementById('success-backdrop');
+            const panel = document.getElementById('success-panel');
+            const msgEl = document.getElementById('msg-success');
+
+            if(!m || !backdrop || !panel) return console.error("Modal element tidak ditemukan!");
             
-            // Set pesan
-            Utils.getEl('msg-success').innerText = msg;
+            // 2. Set Pesan
+            if(msgEl) msgEl.innerText = msg;
             
-            // Tampilkan modal
+            // 3. Tampilkan Wadah Utama
             m.classList.remove('hidden');
             
-            // --- PERBAIKAN UTAMA: Selector disesuaikan HTML Baru ---
-            // Cari elemen background (backdrop) dan panel konten
-            // Kita gunakan selector yang lebih fleksibel
-            const backdrop = m.querySelector('div.fixed.bg-slate-900\\/60'); 
-            const panel = m.querySelector('div.relative.transform');
-
-            // Animasi Masuk (Fade In & Scale Up)
-            setTimeout(() => {
-                if(backdrop) backdrop.classList.remove('opacity-0');
-                if(panel) {
-                    panel.classList.remove('scale-95', 'opacity-0');
-                    panel.classList.add('scale-100', 'opacity-100');
-                }
-            }, 10);
+            // 4. Animasi Masuk (Fade In & Scale Up)
+            // Menggunakan setTimeout kecil agar browser merender elemen 'block' dulu sebelum animasi
+            requestAnimationFrame(() => {
+                backdrop.classList.remove('opacity-0');
+                panel.classList.remove('scale-95', 'opacity-0');
+                panel.classList.add('scale-100', 'opacity-100');
+            });
             
-            // Auto Close setelah 1.5 detik (sesuai durasi animasi loading bar di HTML)
-            setTimeout(() => {
+            // 5. Durasi Tampil (1.5 Detik)
+            if (this.successTimer) clearTimeout(this.successTimer);
+            this.successTimer = setTimeout(() => {
                 this.closeSuccess();
-            }, 1500); 
+            }, 1500); // 1500ms = 1.5 detik
         },
 
         closeSuccess() {
-            const m = Utils.getEl('modal-success');
-            if(!m) return;
-            
-            // Selector yang sama
-            const backdrop = m.querySelector('div.fixed.bg-slate-900\\/60');
-            const panel = m.querySelector('div.relative.transform');
+            const m = document.getElementById('modal-success');
+            const backdrop = document.getElementById('success-backdrop');
+            const panel = document.getElementById('success-panel');
 
-            // Animasi Keluar (Fade Out & Scale Down)
+            if(!m) return;
+
+            // Animasi Keluar
             if(backdrop) backdrop.classList.add('opacity-0');
             if(panel) {
                 panel.classList.remove('scale-100', 'opacity-100');
@@ -1015,9 +1333,10 @@ showSuccess(msg) {
             }
             
             // Sembunyikan elemen setelah animasi selesai (300ms)
-            setTimeout(() => m.classList.add('hidden'), 300);
+            setTimeout(() => {
+                m.classList.add('hidden');
+            }, 200);
         },
-
         showError(title, msg) {
             const modal = Utils.getEl('modal-error');
             Utils.getEl('error-title').innerText = title;
@@ -1197,42 +1516,42 @@ const StudentController = {
 
             let result;
             let isEditMode = STATE.editing.studentId !== null; 
+            let msgSuccess = "";
 
             if (isEditMode) {
                 // UPDATE
                 result = await DB.updateStudent(STATE.editing.studentId, data);
+                msgSuccess = "Data peserta berhasil diperbarui!";
             } else {
                 // INSERT
                 result = await DB.addStudent(data);
+                msgSuccess = "Peserta baru berhasil ditambahkan!";
             }
 
             if (result.error) throw new Error(result.error.message);
 
             Utils.setLoading(btn, false);
             
-            if (isEditMode) {
-                View.modals.showSuccess("Data berhasil diperbarui!");
-                
-                // --- PERBAIKAN UTAMA (FIX BUG 1) ---
-                // Setelah edit sukses, kita RESET state ID agar tidak "nyangkut"
-                STATE.editing.studentId = null; 
-                
-                // Kembalikan tombol dan judul ke default (opsional, tapi aman)
-                const titleEl = document.getElementById('form-student-title');
-                if(titleEl) titleEl.innerText = "Tambah Peserta Baru";
-                
-                View.nav('students'); 
+            // RESET FORM JIKA TAMBAH BARU
+            if (!isEditMode) {
+                this.prepareAdd(); 
             } else {
-                View.modals.showSuccess("Siswa berhasil ditambahkan!");
-                this.prepareAdd(); // Reset form total
+                // KEMBALI KE LIST JIKA EDIT
+                STATE.editing.studentId = null;
+                View.nav('students');
             }
             
-            View.renderStudents(false);
+            // Render ulang tabel
+            await View.renderStudents(false);
+
+            // Tampilkan Notifikasi dengan jeda
+            setTimeout(() => {
+                View.modals.showSuccess(msgSuccess);
+            }, 100);
 
         } catch (err) {
             Utils.setLoading(btn, false);
             alert("Terjadi Kesalahan: " + err.message);
-            console.error(err);
         }
     }
 };
@@ -1243,76 +1562,220 @@ const ClassController = {
         const desc = Utils.getEl('edit-class-desc').value;
         const isEdit = STATE.editing.classId;
         
-        if(!name) return alert("Nama kelas wajib!");
-        Utils.setLoading(btn, true);
+        if(!name) return alert("Nama kelas wajib diisi!");
         
-        let res = isEdit ? await DB.updateClass(isEdit, { nama_kelas: name, deskripsi: desc }) 
-                         : await DB.addClass({ nama_kelas: name, kode_kelas: "KLS-"+Date.now(), deskripsi: desc });
+        // 1. TAMPILKAN STATUS LOADING DI TOMBOL
+        // Pop-up TIDAK muncul di sini karena proses belum sukses. 
+        // User tahu proses berjalan karena tombol berubah jadi "Menyimpan..."
+        Utils.setLoading(btn, true, "Menyimpan...");
+        
+        let res;
+        let msgSuccess = "";
+
+        if(isEdit) {
+            res = await db.from('classes').update({ nama_kelas: name, deskripsi: desc }).eq('id', isEdit);
+            msgSuccess = "Data kelas berhasil diperbarui!";
+        } else {
+            const code = Math.floor(1000 + Math.random() * 9000);
+            res = await db.from('classes').insert([{ nama_kelas: name, kode_kelas: "KLS-" + code, deskripsi: desc }]);
+            msgSuccess = "Kelas baru berhasil ditambahkan!";
+        }
                           
-        Utils.setLoading(btn, false);
+        Utils.setLoading(btn, false); // Matikan loading tombol
+
         if(!res.error) {
-            View.modals.closeEditClass();
-            View.modals.showSuccess("Data kelas disimpan");
-            View.renderClasses();
+            View.modals.closeEditClass(); // Tutup form
+            STATE.editing.classId = null;
+
+            await View.renderClasses(); // Tunggu tabel update
+            
+            // 2. BARU TAMPILKAN POP-UP
+            // Beri jeda 0.1 detik agar transisi mulus
+            setTimeout(() => {
+                View.modals.showSuccess(msgSuccess);
+            }, 100);
+        } else {
+            alert("Gagal: " + res.error.message);
         }
     }
 };
-
 const RoomController = {
+    // A. FUNGSI SIMPAN RUANGAN
     async save() {
         const btn = document.querySelector('#modal-edit-room button[onclick="saveRoomData()"]');
         const name = Utils.getEl('edit-room-name').value;
         const desc = Utils.getEl('edit-room-desc').value;
         const isEdit = STATE.editing.roomId;
         
-        if(!name) return alert("Nama wajib!");
-        Utils.setLoading(btn, true);
+        if(!name) return alert("Nama ruangan wajib diisi!");
         
-        let res = isEdit ? await DB.updateRoom(isEdit, { nama_ruangan: name, deskripsi: desc })
-                         : await DB.addRoom({ nama_ruangan: name, kode_ruangan: "R-"+Date.now(), deskripsi: desc });
-                          
-        Utils.setLoading(btn, false);
-        if(!res.error) {
-            View.modals.closeEditRoom();
-            View.modals.showSuccess("Data ruangan disimpan");
-            View.renderRooms();
-        }
-    },
-    async delete() {
-        const { pendingDeleteId: id, pendingDeleteType: type } = STATE.editing;
-        Utils.getEl('modal-confirm-delete').classList.add('hidden');
+        Utils.setLoading(btn, true, "Menyimpan...");
         
         let res;
-        if(type === 'class') { res = await DB.deleteClass(id); View.renderClasses(); }
-        else if(type === 'room') { res = await DB.deleteRoom(id); View.renderRooms(); }
-        else if(type === 'exam') { res = await DB.deleteExam(id); View.renderExamList(); }
-        else if(type === 'student') { 
-             const { error } = await db.from('students').delete().eq('id_peserta', id); 
-             if(!error) View.renderStudents(false);
+        let msgSuccess = "";
+
+        if(isEdit) {
+            // UPDATE
+            res = await db.from('rooms')
+                          .update({ nama_ruangan: name, deskripsi: desc })
+                          .eq('id', isEdit);
+            msgSuccess = "Data ruangan berhasil diperbarui!";
+        } else {
+            // TAMBAH
+            const code = Math.floor(1000 + Math.random() * 9000);
+            res = await db.from('rooms')
+                          .insert([{ 
+                              nama_ruangan: name, 
+                              kode_ruangan: "R-" + code, 
+                              deskripsi: desc 
+                          }]);
+            msgSuccess = "Ruangan baru berhasil ditambahkan!";
         }
-        if(!res?.error) View.modals.showSuccess("Data berhasil dihapus");
+                          
+        Utils.setLoading(btn, false);
+        
+        if(!res.error) {
+            View.modals.closeEditRoom();
+            STATE.editing.roomId = null;
+            
+            await View.renderRooms(); // Tunggu render
+            
+            setTimeout(() => {
+                View.modals.showSuccess(msgSuccess);
+            }, 100);
+        } else {
+            alert("Gagal: " + res.error.message);
+        }
+    },
+
+    // B. FUNGSI HAPUS (UNIVERSAL UNTUK SEMUA)
+    async executeDelete() {
+        const id = STATE.editing.pendingDeleteId;
+        const type = STATE.editing.pendingDeleteType;
+        
+        if (!id) return;
+
+        // Ubah tombol jadi loading
+        const btn = document.querySelector('#modal-confirm-delete button.bg-red-600');
+        const textAsli = btn.innerText;
+        btn.innerText = "Menghapus...";
+        
+        let res;
+        // Hapus sesuai tipe
+        if (type === 'class') res = await DB.deleteClass(id);
+        else if (type === 'room') res = await DB.deleteRoom(id);
+        else if (type === 'exam') res = await DB.deleteExam(id);
+        else if (type === 'student') res = await db.from('students').delete().eq('id', id);
+
+        // Kembalikan tombol
+        btn.innerText = textAsli;
+
+        if (res && res.error) {
+            alert("Gagal menghapus: " + res.error.message);
+        } else {
+            Utils.getEl('modal-confirm-delete').classList.add('hidden'); // Tutup Modal Hapus
+            
+            // Simpan tipe agar tidak hilang saat reset
+            const tipeTadi = type;
+            
+            // Reset State
+            STATE.editing.pendingDeleteId = null;
+            STATE.editing.pendingDeleteType = null;
+
+            // Render ulang tabel (TUNGGU SAMPAI SELESAI)
+            if (tipeTadi === 'class') await View.renderClasses();
+            if (tipeTadi === 'room') await View.renderRooms();
+            if (tipeTadi === 'exam') await View.renderExamList();
+            if (tipeTadi === 'student') await View.renderStudents(false);
+
+            // Tampilkan Pesan Hapus dengan jeda
+            setTimeout(() => {
+                View.modals.showSuccess("Data berhasil dihapus permanen.");
+            }, 100);
+        }
     }
 };
-
 const ExamController = {
+    // 1. TAMBAH UJIAN BARU
     async add() {
-        const name = prompt("Nama Ujian:");
-        if(name) {
-            await DB.addExam({ nama_ujian: name, status: 'Tidak Aktif', alokasi: '90 Menit' });
+        const name = prompt("Masukkan Nama Ujian Baru:");
+        if (!name) return;
+
+        // Loading
+        const btn = document.querySelector('button[onclick="ExamController.add()"]');
+        Utils.setLoading(btn, true);
+
+        try {
+        const { data, error } = await db.from('exams')
+            .insert([{ 
+                // PENTING: Gunakan 'nama_ujian' sesuai nama kolom di Supabase
+                nama_ujian: name, 
+                alokasi: '90 Menit', 
+                status: 'Tidak Aktif',
+                pengelola: 'Admin'
+            }])
+            .select();
+
+            if (error) throw error;
+
+            // Update Cache & UI Realtime
+            STATE.cache.exams.push(data[0]); 
             View.renderExamList();
-            View.updateDashboard();
+            View.modals.showSuccess("Ujian berhasil ditambahkan!");
+
+        } catch (e) {
+            alert("Gagal menambah ujian: " + e.message);
+        } finally {
+            Utils.setLoading(btn, false);
         }
     },
-    async toggleStatus(idx) {
-        const exam = STATE.cache.exams[idx];
+
+    // 2. GANTI STATUS (AKTIF/MATI)
+    async toggleStatus(id) {
+        // Cari status sekarang di cache
+        const exam = STATE.cache.exams.find(e => String(e.id) === String(id));
+        if (!exam) return;
+
         const newStatus = exam.status === 'Aktif' ? 'Tidak Aktif' : 'Aktif';
-        await DB.updateExam(exam.id, { status: newStatus });
-        View.renderExamList();
-        View.updateDashboard();
+
+        try {
+            // UPDATE KE SUPABASE
+            const { error } = await db.from('exams')
+                .update({ status: newStatus })
+                .eq('id', id);
+
+            if (error) throw error;
+
+            // Update Lokal & UI
+            exam.status = newStatus;
+            View.renderExamList();
+            View.modals.showSuccess(`Status ujian diubah jadi: ${newStatus}`);
+
+        } catch (e) {
+            alert("Gagal update status: " + e.message);
+        }
     },
-    async delete(idx) {
-        const exam = STATE.cache.exams[idx];
-        View.modals.confirmDelete(exam.id, 'exam');
+
+    // 3. HAPUS UJIAN
+    async delete(id) {
+        if (!confirm("Yakin ingin menghapus ujian ini? Data nilai & peserta akan ikut terhapus.")) return;
+
+        try {
+            // HAPUS DARI SUPABASE
+            const { error } = await db.from('exams')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+
+            // Hapus dari Cache Lokal
+            STATE.cache.exams = STATE.cache.exams.filter(e => String(e.id) !== String(id));
+            View.renderExamList();
+            View.modals.showSuccess("Ujian berhasil dihapus.");
+
+        } catch (e) {
+            alert("Gagal menghapus: " + e.message);
+        }
     },
     async saveSettings(section) {
         const id = STATE.editing.examId;
@@ -1325,6 +1788,56 @@ const ExamController = {
         await DB.updateExam(id, data);
         View.modals.showSuccess("Pengaturan tersimpan");
         View.renderExamList();
+    },
+    async openParticipants(examId) {
+        // Simpan ID ujian yg sedang dilihat
+        STATE.editing.examId = examId; 
+        
+        // Pindah ke View Peserta Ujian
+        View.nav('exam-participants');
+        
+        // Load data peserta (Simulasi fetch dari DB)
+        const tbody = Utils.getEl('exam-participants-body');
+        tbody.innerHTML = `<tr><td colspan="16" class="text-center py-8"><span class="animate-spin text-blue-500">⏳</span> Memuat data peserta...</td></tr>`;
+        
+        // Fetch data peserta khusus ujian ini (Implementasikan query DB disini nanti)
+        // Untuk sekarang kita render ulang data dummy/cache agar tampil
+        setTimeout(() => {
+             // Logic render peserta ujian (bisa pakai View.renderStudents dgn filter)
+             tbody.innerHTML = `<tr><td colspan="16" class="text-center py-8 text-slate-400">Belum ada peserta terdaftar di ujian ini.</td></tr>`;
+        }, 500);
+    },
+
+    // 2. Buka Rekap Pengerjaan (Nilai)
+    async openRecap(examId) {
+        STATE.editing.examId = examId;
+        View.nav('recap'); // Pastikan ada <div id="view-recap"> di HTML
+        
+        // Update Judul Rekap
+        const exam = STATE.cache.exams.find(e => String(e.id) === String(examId));
+        if(exam && Utils.getEl('recap-exam-title')) {
+            Utils.getEl('recap-exam-title').innerText = exam.name;
+        }
+        
+        // Load data nilai
+        const tbody = Utils.getEl('recap-table-body');
+        if(tbody) tbody.innerHTML = `<tr><td colspan="4" class="text-center py-8">Memuat nilai...</td></tr>`;
+    },
+
+    // 3. Export Ujian (Ke Excel)
+    exportExam(examId) {
+        const exam = STATE.cache.exams.find(e => String(e.id) === String(examId));
+        if(!exam) return;
+        
+        // Gunakan library XLSX
+        const data = [
+            ["ID Ujian", "Nama Ujian", "Status", "Alokasi"],
+            [exam.id, exam.name, exam.status, exam.alokasi]
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Info Ujian");
+        XLSX.writeFile(wb, `Export_Ujian_${exam.name.replace(/\s+/g, '_')}.xlsx`);
     }
 };
 // ============================================================================
@@ -1422,27 +1935,58 @@ const BulkController = {
         }
 
         // 2. RANDOM PASSWORD MASSAL
+        // 2. RANDOM PASSWORD KUSTOM (BARU)
         else if (type === 'random_pass') {
-            if (!confirm(`Reset password acak untuk ${items.length} siswa?`)) return;
+            if (!confirm(`Reset password kustom untuk ${items.length} siswa?\nFormat: 3 Huruf Nama + 3 Angka Acak`)) return;
 
-            const newPass = Math.random().toString(36).slice(-6).toUpperCase();
-            
-            // Update kedua kolom (password & pass) agar aman
-            const { error } = await DB.bulkUpdateStudents(items, { 
-                password: newPass,
-            });
+            // Kita gunakan try-catch untuk keamanan proses loop
+            try {
+                // Ambil data detail siswa yang dipilih dari cache
+                const targetStudents = STATE.cache.students.filter(s => items.includes(s.id));
+                
+                // Siapkan array promise untuk update parallel (agar cepat)
+                const updates = targetStudents.map(student => {
+                    // Ambil nama, hapus spasi/simbol
+                    const nama = (student.nama_lengkap || student.nama || 'USER').replace(/[^a-zA-Z]/g, ''); 
+                    
+                    // Ambil 3 huruf terakhir. Jika nama pendek, ambil semua lalu tambah 'X'
+                    let suffix = "";
+                    if (nama.length >= 3) {
+                        suffix = nama.substring(nama.length - 3).toUpperCase();
+                    } else {
+                        suffix = nama.toUpperCase().padEnd(3, 'X');
+                    }
 
-            if (!error) {
-                this.finishAction(null, `Password berhasil direset menjadi: ${newPass}`);
-            } else {
-                alert("Gagal reset password: " + error.message);
-                console.error(error);
+                    // Generate 3 angka acak (100-999)
+                    const randomNum = Math.floor(Math.random() * 900) + 100; 
+                    
+                    // Gabungkan: XXX + 123 = 6 Karakter
+                    const newPass = suffix + randomNum;
+
+                    // Update ke DB per user (menggunakan ID spesifik)
+                    // Note: Kita update langsung via DB wrapper atau direct call
+                    return window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY)
+                        .from('students')
+                        .update({ password: newPass })
+                        .eq('id', student.id);
+                });
+
+                // Jalankan semua update sekaligus
+                await Promise.all(updates);
+
+                this.finishAction(null, `Berhasil! Password siswa diubah sesuai format nama.`);
+                
+            } catch (e) {
+                console.error(e);
+                alert("Gagal update password massal: " + e.message);
             }
         }
     },
 
     // C. Helper Selesai Aksi
     finishAction(modalId, msg) {
+        STATE.editing.pendingDeleteId = null;
+        STATE.editing.pendingDeleteType = null;
         if (modalId) {
             const modal = document.getElementById(modalId);
             if(modal) modal.classList.add('hidden');
@@ -1533,7 +2077,7 @@ const RealtimeFeatures = {
     // [RESTORED] Logika Animasi Lingkaran Biru
     // Di dalam objek RealtimeFeatures
     startTimer(target) {
-        if(STATE.intervals.tokenTimer) clearInterval(STATE.intervals.tokenTimer);
+        if(STATE.intervals.tokenTimer) clearInterval(STATE.intervals.tokenTimer);STATE.intervals.tokenTimer = null;
         const circle = document.querySelector('.progress-ring__circle');
         const timerText = Utils.getEl('dash-timer');
         // Asumsi 15 menit full (sesuaikan dengan alokasi token Anda)
@@ -1591,7 +2135,7 @@ const RealtimeFeatures = {
             const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
             let newToken = "";
             for (let i = 0; i < 6; i++) newToken += chars.charAt(Math.floor(Math.random() * chars.length));
-            const expiredAt = new Date(Date.now() + 15 * 60000); // 15 menit
+            const expiredAt = new Date(Date.now() + CONFIG.DEFAULT_TOKEN_DURATION * 60000);
             await db.from('exam_settings').update({ token_code: newToken, expired_at: expiredAt.toISOString() }).eq('id', 1);
         } catch(e) { alert(e.message); } 
         finally { btn.innerHTML = `<i data-feather="refresh-cw" class="w-4 h-4"></i> Generate Baru`; btn.disabled = false; feather.replace(); }
@@ -1728,7 +2272,7 @@ window.saveClassData = () => ClassController.save();
 window.openEditRoomModal = (id) => View.modals.openEditRoom(id);
 window.closeEditRoomModal = () => View.modals.closeEditRoom();
 window.saveRoomData = () => RoomController.save();
-window.executeDelete = () => RoomController.delete();
+window.executeDelete = () => RoomController.executeDelete();
 window.prepareEditClass = (id) => View.modals.openEditClass(id);
 window.deleteClass = (id) => View.modals.confirmDelete(id, 'class');
 window.confirmDelete = (id, type) => View.modals.confirmDelete(id, type);
@@ -1754,7 +2298,27 @@ window.saveQuestion = async () => {
 };
 window.openAddQuestionModal = () => Utils.getEl('modal-add-question').classList.remove('hidden');
 window.renderAnswerInputs = () => { /* Logic render */ };
-window.deleteQuestion = (i) => { if(confirm('Hapus?')) { STATE.cache.questions.splice(i,1); View.renderQuestions(); }};
+window.deleteQuestion = async (index) => {
+    // Ambil objek soal berdasarkan index baris
+    const question = STATE.cache.questions[index];
+    
+    if(!question || !question.id) return alert("Soal tidak ditemukan.");
+
+    if(confirm('Yakin ingin menghapus soal ini selamanya?')) {
+        // Hapus dari Database
+        const { error } = await db.from('questions').delete().eq('id', question.id);
+        
+        if (error) {
+            alert("Gagal menghapus: " + error.message);
+        } else {
+            // Hapus dari Cache Lokal agar UI update tanpa fetch ulang
+            STATE.cache.questions.splice(index, 1);
+            View.renderQuestions();
+            // Tampilkan notifikasi kecil (Opsional)
+            // alert("Soal terhapus."); 
+        }
+    }
+};
 
 // Auth & System
 window.attemptLogin = () => Auth.login('log-user', 'log-pass', 'btn-login');
@@ -1786,12 +2350,6 @@ window.handlePrint = () => {
     win.document.close();
     win.print();
 };
-window.renderCardPreview = () => {
-    const container = Utils.getEl('card-preview-area');
-    container.innerHTML = STATE.cache.students.map(s => `<div class="card p-4 border mb-2 font-bold">${Utils.escapeHTML(s.nama)} - ${Utils.escapeHTML(s.id_peserta)}</div>`).join('');
-};
-window.updateCardLogo = () => {};
-window.updateCardSignature = () => {};
 // --- TAMBAHAN GLOBAL FUNCTIONS ---
 
 // Fungsi untuk membuka/tutup dropdown tombol Terseleksi
@@ -1811,21 +2369,22 @@ window.toggleBulkActions = (e) => {
     }
 };
 
-// Tutup dropdown jika klik di luar (sudah ada di kode lama, tapi pastikan ini)
+// ============================================================================
+// GLOBAL CLICK HANDLER (Menutup Semua Dropdown Saat Klik di Luar)
+// ============================================================================
 window.onclick = (e) => {
-    if (!e.target.closest('#dropdown-bulk-actions') && !e.target.closest('button[onclick="toggleBulkActions(event)"]')) {
-        const dropdown = document.getElementById('dropdown-bulk-actions');
-        if (dropdown) {
+    
+    // 1. LOGIKA UNTUK MENU ADMIN (PROFIL)
+    // Jika yang diklik BUKAN dropdown profil DAN BUKAN tombol profil
+    if (!e.target.closest('#profile-dropdown') && !e.target.closest('button[onclick*="toggleProfileMenu"]')) {
+        const dropdown = document.getElementById('profile-dropdown');
+        if (dropdown && !dropdown.classList.contains('hidden')) {
             dropdown.classList.add('hidden');
-            dropdown.classList.remove('block');
         }
     }
-    // ... fungsi closeDropdowns lain ...
-};
-// ... (kode sebelumnya tetap sama) ...
 
-// Tutup dropdown jika klik di luar
-window.onclick = (e) => {
+    // 2. LOGIKA UNTUK TOMBOL "TERSELEKSI" (BULK ACTIONS)
+    // Jika yang diklik BUKAN dropdown bulk DAN BUKAN tombol bulk
     if (!e.target.closest('#dropdown-bulk-actions') && !e.target.closest('button[onclick="toggleBulkActions(event)"]')) {
         const dropdown = document.getElementById('dropdown-bulk-actions');
         if (dropdown) {
@@ -1833,7 +2392,13 @@ window.onclick = (e) => {
             dropdown.classList.remove('block');
         }
     }
-    // ... fungsi closeDropdowns lain ...
+
+    // 3. LOGIKA UNTUK TITIK TIGA DI TABEL (ACTION DROPDOWN)
+    // Jika yang diklik BUKAN menu aksi DAN BUKAN tombol titik tiga
+    if (!e.target.closest('.action-dropdown') && !e.target.closest('button[onclick*="toggleActionDropdown"]')) {
+        // Tutup semua dropdown tabel yang terbuka
+        document.querySelectorAll('.action-dropdown').forEach(d => d.classList.remove('show'));
+    }
 };
 // Fungsi Helper untuk membuka modal Bulk Action sekaligus memuat datanya
 window.openBulkModal = (modalId) => {
@@ -1882,10 +2447,241 @@ window.clearAddImage = () => {
     icon.classList.remove('hidden');
     label.innerText = "Tidak ada berkas dipilih.";
 };
+// Tambahkan ini agar ikon foto bisa diklik
+window.triggerPhotoUpload = () => {
+    const input = document.getElementById('file-upload-add');
+    if (input) input.click();
+};
+// 2. FUNGSI MEDIA
+window.updateCardLogo = function(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            logoBase64 = e.target.result;
+            localStorage.setItem('cbt_logo_data', logoBase64);
+            const status = document.getElementById('logo-status');
+            if(status) status.innerText = "Logo Terpasang";
+            renderCardPreview(); 
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+};
+
+window.updateCardSignature = function(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            signatureBase64 = e.target.result;
+            localStorage.setItem('cbt_sig_data', signatureBase64);
+            renderCardPreview();
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+};
+
+window.removeLogo = function() {
+    logoBase64 = null;
+    localStorage.removeItem('cbt_logo_data');
+    document.getElementById('card-logo-input').value = "";
+    renderCardPreview();
+};
+// Ganti fungsi window.showCardPreview yang lama dengan ini:
+window.showCardPreview = () => {
+    // 1. Validasi: Harus ada siswa yang dipilih
+    if (View.selectedItems.length === 0) {
+        alert("Pilih minimal satu siswa untuk mencetak kartu!");
+        return;
+    }
+    
+    // 2. Pindah ke halaman cetak
+    View.nav('card-print');
+    
+    // 3. Muat data yang tersimpan di memori (Auto-Fill)
+    loadPrintSettings();
+    
+    // 4. Render Kartu (Beri sedikit delay agar elemen HTML siap)
+    setTimeout(() => {
+        renderCardPreview();
+        autoScalePaper();
+    }, 150);
+};
+window.renderCardPreview = () => {
+    const container = Utils.getEl('card-preview-area');
+    if (!container) return;
+
+    // 1. Ambil Data Form
+    const d = {
+        h1: Utils.getEl('card-h1').value || 'DINAS PENDIDIKAN',
+        h2: Utils.getEl('card-h2').value || 'NAMA SEKOLAH',
+        h3: Utils.getEl('card-h3').value || 'Alamat Sekolah',
+        title: Utils.getEl('card-title').value || 'KARTU PESERTA UJIAN',
+        sub: Utils.getEl('card-subtitle').value || 'SEMESTER GANJIL',
+        guru: Utils.getEl('card-teacher').value || 'Kepala Sekolah',
+        nip: Utils.getEl('card-nip').value || '-'
+    };
+
+    // 2. Filter Data
+    const selectedStudents = STATE.cache.students.filter(s => 
+        View.selectedItems.includes(String(s.id))
+    );
+
+    if (selectedStudents.length === 0) {
+        container.innerHTML = '<div class="flex h-full items-center justify-center text-slate-400 font-bold">Tidak ada data siswa dipilih.</div>';
+        return;
+    }
+
+    // 3. Render HTML (MENGGUNAKAN CLASS SAJA, TANPA STYLE)
+    // Ini memastikan CSS di style.css yang memegang kendali penuh
+    container.innerHTML = selectedStudents.map(s => `
+        <div class="pc-card">
+            <div class="pc-header">
+                ${logoBase64 ? `<img src="${logoBase64}" class="pc-logo">` : '<div style="width: 26px;"></div>'}
+                <div class="pc-header-text" style="margin-right: ${logoBase64 ? '26px' : '0'}">
+                    <h3>${d.h1}</h3>
+                    <h2>${d.h2}</h2>
+                    <p>${d.h3}</p>
+                </div>
+            </div>
+            
+            <div class="pc-title-box">
+                <strong class="pc-title-main">${d.title}</strong>
+                <span class="pc-title-sub">${d.sub}</span>
+            </div>
+
+            <div class="pc-content">
+                <div class="pc-photo-box">
+                    ${s.foto_url ? `<img src="${s.foto_url}" class="pc-photo-img">` : 'FOTO'}
+                </div>
+                <div style="flex: 1;">
+                    <table class="pc-table">
+                        <tr><td>No</td><td>: <b>${s.id_peserta || '-'}</b></td></tr>
+                        <tr><td>Nama</td><td>: <b style="text-transform: uppercase;">${(s.nama_lengkap || s.nama || '-').substring(0, 15)}</b></td></tr>
+                        <tr><td>Kelas</td><td>: ${s.kelas || '-'}</td></tr>
+                        <tr><td>User</td><td>: ${s.username || '-'}</td></tr>
+                        <tr><td>Pass</td><td>: <b>${s.password || s.pass || '-'}</b></td></tr>
+                        <tr><td>Ruang</td><td>: ${s.ruangan || '-'}</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pc-footer">
+                <p style="margin: 0; line-height: 1;">Kepala Sekolah,</p>
+                <div style="height: 16px; display: flex; align-items: center; justify-content: center;">
+                    ${signatureBase64 ? `<img src="${signatureBase64}" class="pc-sig-img">` : ''}
+                </div>
+                <p style="font-weight: bold; text-decoration: underline; margin: 0; line-height: 1;">${d.guru}</p>
+                <p class="pc-nip">${d.nip}</p>
+            </div>
+        </div>
+    `).join('');
+    
+    // Matikan autoScalePaper bawaan karena CSS print kita sudah 'transform: none'
+    // Tapi tetap berguna untuk preview di layar laptop
+    setTimeout(autoScalePaper, 50);
+};
+/**
+ * FUNGSI AUTO-SCALE (V2.0)
+ * Menyesuaikan kertas A4 (794px) agar pas di lebar layar tanpa merusak layout asli.
+ */
+function autoScalePaper() {
+    const container = document.getElementById('preview-container'); // Wadah abu-abu
+    const paper = document.getElementById('print-area-wrapper');    // Kertas A4 putih
+    
+    if (!container || !paper) return;
+
+    // 1. Definisikan lebar standar A4 dalam pixel (96 DPI = 794px)
+    const paperWidth = 794; 
+    
+    // 2. Ambil lebar layar yang tersedia (dikurangi padding agar tidak mepet)
+    const availableWidth = container.clientWidth - 32; // 32px padding total
+
+    // 3. Hitung skala (Scale)
+    // Jika layar < 794px, maka hitung rasio pengecilannya. Jika lebih besar, tetap 1 (100%).
+    let scale = availableWidth < paperWidth ? availableWidth / paperWidth : 1;
+    
+    // 4. Terapkan Transformasi CSS
+    // Transform-origin 'top center' memastikan kertas tetap di tengah atas saat mengecil
+    paper.style.transformOrigin = "top center"; 
+    paper.style.transform = `scale(${scale})`;
+    
+    // 5. PENYESUAIAN TINGGI (PENTING)
+    // Karena 'scale' tidak mengubah dimensi fisik elemen di DOM, 
+    // kita harus menyesuaikan margin-bottom agar scrollbar bekerja dengan benar.
+    const paperHeight = 1123; // Tinggi standar A4 (297mm)
+    const scaledHeight = paperHeight * scale;
+    
+    // Hitung sisa ruang yang hilang akibat scaling untuk ditarik kembali
+    const offset = paperHeight - scaledHeight;
+    paper.style.marginBottom = `-${offset}px`; 
+
+    // Opsional: Beri padding bawah pada container agar kertas tidak terpotong di paling bawah
+    container.style.paddingBottom = "40px";
+}
+
+// Tambahkan Event Listener agar saat layar diputar (HP) atau di-resize (Laptop), skala update otomatis
+window.addEventListener('resize', autoScalePaper);
+// --- FUNGSI SIMPAN PENGATURAN CETAK ---
+function savePrintSettings() {
+    const settings = {
+        h1: Utils.getEl('card-h1').value,
+        h2: Utils.getEl('card-h2').value,
+        h3: Utils.getEl('card-h3').value,
+        title: Utils.getEl('card-title').value,
+        subtitle: Utils.getEl('card-subtitle').value,
+        teacher: Utils.getEl('card-teacher').value,
+        nip: Utils.getEl('card-nip').value
+    };
+
+    localStorage.setItem('cbt_print_settings', JSON.stringify(settings));
+    alert("✅ Pengaturan Kop Surat berhasil disimpan!");
+}
+
+// --- FUNGSI MUAT PENGATURAN CETAK ---
+function loadPrintSettings() {
+    const saved = localStorage.getItem('cbt_print_settings');
+    if (saved) {
+        const data = JSON.parse(saved);
+        Utils.getEl('card-h1').value = data.h1 || '';
+        Utils.getEl('card-h2').value = data.h2 || '';
+        Utils.getEl('card-h3').value = data.h3 || '';
+        Utils.getEl('card-title').value = data.title || '';
+        Utils.getEl('card-subtitle').value = data.subtitle || '';
+        Utils.getEl('card-teacher').value = data.teacher || '';
+        Utils.getEl('card-nip').value = data.nip || '';
+        
+        // Render ulang preview agar perubahan langsung terlihat
+        renderCardPreview();
+    }
+}
+/**
+ * FUNGSI DOWNLOAD TEMPLATE EXCEL
+ */
+function downloadStudentTemplate() {
+    try {
+        // Struktur kolom sesuai kebutuhan database
+        const headers = [["nama_lengkap", "nisn", "kelas", "jurusan", "username", "password", "ruangan", "sesi"]];
+        const sampleData = [
+            ["Budi Sudarsono", "12345678", "XI", "Farmasi", "budi123", "pass123", "R 03", "1"]
+        ];
+        
+        const data = [...headers, ...sampleData];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Daftar Siswa");
+
+        // Download file
+        XLSX.writeFile(wb, "Template_Peserta_CBT.xlsx");
+    } catch (error) {
+        console.error("Gagal mendownload template:", error);
+        alert("Terjadi kesalahan saat membuat template Excel.");
+    }
+}
 // ============================================================================
 // Start App
 // ============================================================================
 document.addEventListener("DOMContentLoaded", () => App.init());
+
+
 
 
 
